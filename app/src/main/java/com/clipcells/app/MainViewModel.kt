@@ -1,7 +1,6 @@
 package com.clipcells.app
 
 import android.app.Application
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.clipcells.app.copy.CopyService
@@ -35,7 +34,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val unfinished = repository.unfinishedQueueSize() ?: return@launch
             pendingCount = unfinished
-            runCatching { ContextCompat.startService(application, CopyService.startIntent(application)) }
+            runCatching { application.startService(CopyService.startIntent(application)) }
         }
     }
 
@@ -59,7 +58,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 pendingCount = prepare()
                 val context = getApplication<Application>()
-                ContextCompat.startService(context, CopyService.startIntent(context))
+                context.startService(CopyService.startIntent(context))
             }.onFailure(onError)
         }
     }

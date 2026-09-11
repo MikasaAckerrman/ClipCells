@@ -455,11 +455,7 @@ private fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, o
                         }
                     }
                 }
-                OutlinedButton(
-                    onClick = { messages.add("") },
-                    modifier = Modifier.fillMaxWidth(),
-                    contentColor = MaterialTheme.colorScheme.onBackground,
-                ) { Icon(Icons.Default.Add, null); Text(" Добавить сообщение") }
+                OutlinedButton(onClick = { messages.add("") }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text(" Добавить сообщение") }
                 Spacer(Modifier.height(8.dp))
                 Text("Интервал: ${"%.1f".format(interval / 1000f)} сек.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 androidx.compose.material3.Slider(
