@@ -1,9 +1,17 @@
 package com.clipcells.app.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 
 internal val MonoScheme = darkColorScheme(
     primary = Color(0xFFFFFFFF),
@@ -27,5 +35,15 @@ internal val MonoScheme = darkColorScheme(
 
 @Composable
 internal fun ClipCellsTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = MonoScheme, content = content)
+    val entrance = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { entrance.animateTo(1f, tween(190)) }
+    MaterialTheme(colorScheme = MonoScheme) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = entrance.value },
+        ) {
+            content()
+        }
+    }
 }
