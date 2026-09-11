@@ -121,33 +121,35 @@ internal fun CellCard(
                 scaleX = 1f - 0.05f * press.value
                 scaleY = 1f - 0.05f * press.value
             }
-            .then(gesture)
-            .drawBehind {
-                val hold = holdProgress.value
-                val width = (if (selected) 2f else 1f + hold * 3f).dp.toPx()
-                val brush = if (selected) {
-                    borderBrush
-                } else {
-                    borderBrush.copy(alpha = 0.35f + hold * 0.65f)
-                }
-                drawRoundRect(
-                    color = brush,
-                    cornerRadius = CornerRadius(0.32f * size.width, 0.32f * size.height),
-                    style = Stroke(width = width),
-                )
-            },
+            .then(gesture),
         shape = shape,
         colors = CardDefaults.cardColors(
             containerColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
         ),
     ) {
-        Box(Modifier.fillMaxSize()) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = press.value * 0.14f }
-                    .background(MaterialTheme.colorScheme.primary),
-            )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    // волна нажатия и рамка — внутри клипа карточки, поверх фона
+                    val pressedNow = press.value
+                    if (pressedNow > 0f) {
+                        drawRect(color = borderBrush.copy(alpha = pressedNow * 0.14f))
+                    }
+                    val hold = holdProgress.value
+                    val width = (if (selected) 2f else 1f + hold * 3f).dp.toPx()
+                    val brush = if (selected) {
+                        borderBrush
+                    } else {
+                        borderBrush.copy(alpha = 0.35f + hold * 0.65f)
+                    }
+                    drawRoundRect(
+                        color = brush,
+                        cornerRadius = CornerRadius(0.32f * size.width, 0.32f * size.height),
+                        style = Stroke(width = width),
+                    )
+                },
+        ) {
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     cell.cell.name,
