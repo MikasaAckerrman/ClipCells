@@ -316,11 +316,7 @@ private fun EmptyState(modifier: Modifier, onCreate: () -> Unit) {
         Spacer(Modifier.height(8.dp))
         Text("Создайте первую ячейку и добавьте сообщения", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(20.dp))
-        Button(
-            onClick = onCreate,
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-        ) { Icon(Icons.Default.Add, null); Text(" Создать") }
+        Button(onClick = onCreate) { Icon(Icons.Default.Add, null); Text(" Создать") }
     }
 }
 
@@ -358,7 +354,7 @@ private fun CellCard(
             val up = waitForUpOrCancellation()
             timer.cancel()
             if (up != null && !held && System.currentTimeMillis() - downTime < 600) {
-                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 onTap()
             }
             gestureScope.launch {
