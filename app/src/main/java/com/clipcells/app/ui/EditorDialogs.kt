@@ -84,24 +84,34 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("Название", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(name, { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 Text("Сообщения — копируются сверху вниз", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(messages.size) { index ->
                         val text = messages[index]
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                text,
-                                { messages[index] = it },
-                                label = { Text("Сообщение ${index + 1}") },
-                                modifier = Modifier.weight(1f).heightIn(min = 56.dp, max = 96.dp),
-                                minLines = 2,
-                                maxLines = 3,
-                            )
-                            IconButton(onClick = { if (messages.size > 1) messages.removeAt(index) }, enabled = messages.size > 1) {
-                                Icon(Icons.Default.Close, "Удалить сообщение")
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "Сообщение ${index + 1}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                OutlinedTextField(
+                                    text,
+                                    { messages[index] = it },
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 88.dp),
+                                    minLines = 2,
+                                    maxLines = 3,
+                                )
                             }
+                            IconButton(
+                                onClick = { if (messages.size > 1) messages.removeAt(index) },
+                                enabled = messages.size > 1,
+                            ) { Icon(Icons.Default.Close, "Удалить сообщение") }
                         }
                     }
                 }
