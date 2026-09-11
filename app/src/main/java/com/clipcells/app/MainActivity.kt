@@ -71,7 +71,8 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
-    val cells by vm.cells.collectAsStateWithLifecycle()
+    val cellsOrNull by vm.cells.collectAsStateWithLifecycle()
+    val cells = cellsOrNull ?: return
     val queueState by vm.queue.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("display", 0) }

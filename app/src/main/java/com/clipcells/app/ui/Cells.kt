@@ -1,10 +1,13 @@
 package com.clipcells.app.ui
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -34,6 +37,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -86,8 +92,8 @@ internal fun CellCard(
             var held = false
             val timer = gestureScope.launch {
                 try {
-                    press.animateTo(1f, tween(90))
-                    holdProgress.animateTo(1f, tween(HOLD_TO_OPEN_MILLIS))
+                    press.animateTo(1f, tween(90, easing = FastOutSlowInEasing))
+                    holdProgress.animateTo(1f, tween(HOLD_TO_OPEN_MILLIS, easing = FastOutSlowInEasing))
                     held = true
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onHold()
@@ -103,7 +109,7 @@ internal fun CellCard(
             }
             gestureScope.launch {
                 holdProgress.snapTo(0f)
-                press.animateTo(0f, tween(140))
+                press.animateTo(0f, tween(160, easing = FastOutSlowInEasing))
             }
         }
     }
@@ -116,13 +122,20 @@ internal fun CellCard(
                 scaleY = 1f - 0.05f * press.value
             }
             .then(gesture)
-            .border(
-                BorderStroke(
-                    if (selected) 2.dp else 1.dp,
-                    if (selected) borderBrush else borderBrush.copy(alpha = 0.35f + holdProgress.value * 0.65f),
-                ),
-                shape,
-            ),
+            .drawBehind {
+                val hold = holdProgress.value
+                val width = (if (selected) 2f else 1f + hold * 3f).dp.toPx()
+                val brush = if (selected) {
+                    borderBrush
+                } else {
+                    borderBrush.copy(alpha = 0.35f + hold * 0.65f)
+                }
+                drawRoundRect(
+                    color = brush,
+                    cornerRadius = CornerRadius(0.32f * size.width, 0.32f * size.height),
+                    style = Stroke(width = width),
+                )
+            },
         shape = shape,
         colors = CardDefaults.cardColors(
             containerColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
@@ -151,7 +164,14 @@ internal fun CellCard(
                     color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            androidx.compose.animation.AnimatedVisibility(selected, Modifier.align(Alignment.TopEnd)) {
+            androidx.compose.animation.AnimatedVisibility(
+                selected,
+                Modifier.align(Alignment.TopEnd),
+                enter = fadeIn(tween(130, easing = FastOutSlowInEasing)) +
+                    scaleIn(initialScale = 0.7f, animationSpec = tween(130, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(100, easing = FastOutSlowInEasing)) +
+                    scaleOut(targetScale = 0.7f, animationSpec = tween(100, easing = FastOutSlowInEasing)),
+            ) {
                 Box(
                     Modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onPrimary),
                     contentAlignment = Alignment.Center,

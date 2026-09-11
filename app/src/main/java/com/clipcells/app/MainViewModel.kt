@@ -10,6 +10,7 @@ import com.clipcells.app.data.CellWithMessages
 import com.clipcells.app.data.ClipCellsDatabase
 import com.clipcells.app.data.CopyQueueEntity
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -18,10 +19,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastDeleted: List<CellWithMessages> = emptyList()
     private var pendingCount: Int? = null
 
-    val cells = repository.observeCells().stateIn(
+    val cells = repository.observeCells().map<List<CellWithMessages>, List<CellWithMessages>?> { it }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        emptyList(),
+        null,
     )
 
     val queue: kotlinx.coroutines.flow.StateFlow<CopyQueueEntity?> = repository.observeQueue().stateIn(
