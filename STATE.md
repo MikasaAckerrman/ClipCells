@@ -1,37 +1,25 @@
 # STATE.md — ClipCells
 
-- date: 2026-09-11 (v0.2)
-- local: develop 1a9a24e, dirty: нет
+- date: 2026-09-11 (v0.3, на устройстве пока v0.2)
+- local: develop efe6085, dirty: нет
 - remote: github.com/MikasaAckerrman/ClipCells (private), default=develop
-- CI: run 34584034531 SUCCESS, APK v0.2.0 (11 MB, без material-icons-extended)
-- build: :app:assembleDebug зелёный; :core:test 6/6 зелёный
+- CI: run 34588682204 SUCCESS (workflow_dispatch) — v0.3.0 APK с СТАБИЛЬНОЙ подписью
+- APK артефакт: 11 022 815 байт, md5 38c9144c…
 
-## Проверено на устройстве (v0.2)
-- Тап по ячейке «minis» (3 сообщ.) → подсказка «Скопировано 3 сообщения» в приложении ✓
-- Системного уведомления при копировании НЕТ (список уведомлений пуст) ✓
-- Финальный буфер = третье сообщение очереди (фрагмент протокола) ✓
-- Установка: mount projectGITHUB → shizuku exec cat → /data/local/tmp → pm install (cp НЕ перезаписывает файл — использовать cat >)
+## v0.3 изменения
+- Редактор: подтверждение потери данных только при реальных изменениях (name/messages/interval против исходника)
+- Поля сообщений: фикс высота 56–96dp, min 2 / max 3 строки, внутренний скролл длинного текста
+- Стабильная подпись: PKCS12 key clipcells3.keystore → секреты CLIPCELLS_KEYSTORE_B64 + CLIPCELLS_STORE_PASSWORD (GitHub Actions); gradle CLIPCELLS_STORE_FILE/PASSWORD, exists()-guard, debug+release
+- Разбивка UI: ui/HomeMode.kt, ui/Theme.kt, ui/Cells.kt (EmptyState+CellCard, HOLD_TO_OPEN_MILLIS), ui/EditorDialogs.kt (+copiedText)
+- Перф/чистка: lazy PendingIntent в CopyService, contentType у grid-итемов, убран мёртвый junit в :app, файл MainActivity 567 → 4 модуля
 
-## Изменения v0.2
-- Уведомление только при уходе в фон (ProcessLifecycleOwner → FGS specialUse), в приложении — snackbar
-- Восстановление очереди: VM init → unfinishedQueueSize → startService (продолжение с nextIndex)
-- Монохром тема (чёрный #050505/белый), fixed dark; squircle percent=32; пресс-волна + scale
-- values-v31 splash background #050505 → белый экран старта убран
-- Убраны: material-icons-extended, vectorDrawables, ContextCompat.startForegroundService
+## На устройстве
+- Установлена v0.2.0 (временная подпись из CI debug) — ПОСТАВИТЬ v0.3 только после удаления (смена подписи); последующие обновления встанут поверх без удаления
+- Gboard-история (3 отдельные записи) — не проверена; удержание/выбор/Undo — не проверены юзером
 
-## Не проверено
-- Gboard история: все 3 записи отдельными элементами (нужен ClipCells на переднем плане + поле ввода)
-- Удержание 2,7 с → окно 3×3, выбор, Undo удаления — ручные
-- Мигание статус-бара: уведомление убрано (корневая причина), визуально подтвердить юзеру
-
-## next
-1. Тест Gboard-истории на устройстве.
-2. Ручной прогон: удержание/выбор/Undo/фоновая очередь с уведомлением.
-3. Экспорт/импорт, блокировка PIN/биометрия.
-4. Список доработок от юзера (обещал скинуть).
-
-## Инфраструктура
-- git-guard запрещает push в master — работать в develop, CI на все ветки.
-- KSP подключён resolutionStrategy (маркер на портале 404). Room 2.7.0 + KSP1 1.0.31 — работает.
-- CI: gradle/actions/setup-gradle@v4 + temurin 21; артефакт ClipCells-debug-apk.
-- Установка: cp в /var/minis/mounts/projectGITHUB → shizuku exec cat > /data/local/tmp → pm install.
+## Инфраструктура (проверено)
+- Установка: mounts/projectGITHUB → shizuku exec `cat src > dst` (cp не перезаписывает) → pm install
+- Секреты: gh secret set только через `< файл` (пайп `printf | gh --input -` падает молча)
+- keytool НЕ перезаписывает существующий PKCS12 — генерировать в новый файл
+- Мёртвые ключи: keystore/clipcells.keystore и clipcells2.keystore (пароль потерян, пустые) — удалить вручную юзером
+- git-guard: push только в develop; CI на все ветки

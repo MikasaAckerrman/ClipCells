@@ -35,6 +35,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val unfinished = repository.unfinishedQueueSize() ?: return@launch
             pendingCount = unfinished
             runCatching { application.startService(CopyService.startIntent(application)) }
+                .onFailure { pendingCount = null }
         }
     }
 
@@ -59,7 +60,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 pendingCount = prepare()
                 val context = getApplication<Application>()
                 context.startService(CopyService.startIntent(context))
-            }.onFailure(onError)
+            }.onFailure {
+                pendingCount = null
+                onError(it)
+            }
         }
     }
 
