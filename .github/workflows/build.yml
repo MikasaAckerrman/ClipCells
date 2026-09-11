@@ -32,8 +32,8 @@ jobs:
       - name: Unit tests (core)
         run: gradle :core:test
 
-      - name: Assemble debug APK
-        run: gradle :app:assembleDebug
+      - name: Assemble APKs
+        run: gradle :app:assembleRelease :app:assembleDebug
         env:
           CLIPCELLS_STORE_FILE: ${{ runner.temp }}/clipcells.keystore
           CLIPCELLS_STORE_PASSWORD: ${{ secrets.CLIPCELLS_STORE_PASSWORD }}
@@ -41,5 +41,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ClipCells-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: ClipCells-apk
+          path: app/build/outputs/apk/**/*.apk

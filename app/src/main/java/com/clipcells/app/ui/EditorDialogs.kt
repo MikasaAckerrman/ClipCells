@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -31,7 +32,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,7 +45,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,6 +62,45 @@ internal fun copiedText(n: Int): String = when {
     n % 10 == 1 && n % 100 != 11 -> "Скопировано $n сообщение"
     n % 10 in 2..4 && n % 100 !in 12..14 -> "Скопировано $n сообщения"
     else -> "Скопировано $n сообщений"
+}
+
+@Composable
+private fun MonoField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    caption: String,
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = false,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val border = if (focused) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
+    val captionColor = if (focused) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(modifier) {
+        Text(caption, style = MaterialTheme.typography.labelMedium, color = captionColor)
+        Spacer(Modifier.height(2.dp))
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = singleLine,
+            minLines = if (singleLine) 1 else 2,
+            maxLines = if (singleLine) 1 else 3,
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (singleLine) 44.dp else 68.dp)
+                .drawBehind {
+                    drawRoundRect(
+                        color = border,
+                        cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx()),
+                        style = Stroke(width = 1.dp.toPx()),
+                    )
+                },
+            decorationBox = { inner ->
+                Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) { inner() }
+            },
+        )
+    }
 }
 
 @Composable
@@ -102,20 +144,24 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                MonoField(
+                    value = name,
+                    onValueChange = { name = it },
+                    caption = "Название",
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(10.dp))
                 Text("Сообщения — копируются сверху вниз", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(messages.size) { index ->
                         val text = messages[index]
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                text,
-                                { messages[index] = it },
-                                label = { Text("Сообщение ${index + 1}") },
-                                modifier = Modifier.weight(1f).height(84.dp),
-                                minLines = 2,
-                                maxLines = 3,
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            MonoField(
+                                value = text,
+                                onValueChange = { messages[index] = it },
+                                caption = "Сообщение ${index + 1}",
+                                modifier = Modifier.weight(1f),
                             )
                             IconButton(onClick = { if (messages.size > 1) messages.removeAt(index) }, enabled = messages.size > 1) {
                                 Icon(Icons.Default.Close, "Удалить сообщение")
