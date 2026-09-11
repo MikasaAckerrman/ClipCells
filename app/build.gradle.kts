@@ -44,18 +44,18 @@ android {
     kotlinOptions { jvmTarget = "17" }
 
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
-}
 
-buildTypes {
-    release {
-        isMinifyEnabled = false
-        if (stableSigningAvailable) {
-            signingConfig = signingConfigs.getByName("ci")
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            if (stableSigningAvailable) {
+                signingConfig = signingConfigs.getByName("ci")
+            }
         }
-    }
-    debug {
-        if (stableSigningAvailable) {
-            signingConfig = signingConfigs.getByName("ci")
+        debug {
+            if (stableSigningAvailable) {
+                signingConfig = signingConfigs.getByName("ci")
+            }
         }
     }
 }
