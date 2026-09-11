@@ -7,6 +7,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -183,7 +190,13 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
         }
     }
 
-    if (showEditor) {
+    AnimatedVisibility(
+        visible = showEditor,
+        enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(240, easing = FastOutSlowInEasing)) +
+            fadeIn(tween(240, easing = FastOutSlowInEasing)),
+        exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(200, easing = FastOutSlowInEasing)) +
+            fadeOut(tween(200, easing = FastOutSlowInEasing)),
+    ) {
         CellEditorDialog(
             source = editorCell,
             onDismiss = { showEditor = false },

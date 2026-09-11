@@ -3,10 +3,6 @@ package com.clipcells.app.ui
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -143,9 +139,10 @@ internal fun CellCard(
                     } else {
                         borderBrush.copy(alpha = 0.35f + hold * 0.65f)
                     }
+                    val radius = 0.32f * minOf(size.width, size.height)
                     drawRoundRect(
                         color = brush,
-                        cornerRadius = CornerRadius(0.32f * size.width, 0.32f * size.height),
+                        cornerRadius = CornerRadius(radius, radius),
                         style = Stroke(width = width),
                     )
                 },
@@ -166,14 +163,7 @@ internal fun CellCard(
                     color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            androidx.compose.animation.AnimatedVisibility(
-                selected,
-                Modifier.align(Alignment.TopEnd),
-                enter = fadeIn(tween(130, easing = FastOutSlowInEasing)) +
-                    scaleIn(initialScale = 0.7f, animationSpec = tween(130, easing = FastOutSlowInEasing)),
-                exit = fadeOut(tween(100, easing = FastOutSlowInEasing)) +
-                    scaleOut(targetScale = 0.7f, animationSpec = tween(100, easing = FastOutSlowInEasing)),
-            ) {
+            androidx.compose.animation.AnimatedVisibility(selected, Modifier.align(Alignment.TopEnd)) {
                 Box(
                     Modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onPrimary),
                     contentAlignment = Alignment.Center,
