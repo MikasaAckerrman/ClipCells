@@ -1,8 +1,6 @@
 package com.clipcells.app
 
 import android.app.Application
-import android.content.Context
-import android.content.Intent
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -11,6 +9,7 @@ import com.clipcells.app.data.CellDraft
 import com.clipcells.app.data.CellRepository
 import com.clipcells.app.data.CellWithMessages
 import com.clipcells.app.data.ClipCellsDatabase
+import com.clipcells.app.data.CopyQueueEntity
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -18,12 +17,29 @@ import kotlinx.coroutines.launch
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = CellRepository(ClipCellsDatabase.get(application))
     private var lastDeleted: List<CellWithMessages> = emptyList()
+    private var pendingCount: Int? = null
 
     val cells = repository.observeCells().stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
         emptyList(),
     )
+
+    val queue: kotlinx.coroutines.flow.StateFlow<CopyQueueEntity?> = repository.observeQueue().stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        null,
+    )
+
+    init {
+        viewModelScope.launch {
+            val unfinished = repository.unfinishedQueueSize() ?: return@launch
+            pendingCount = unfinished
+            runCatching { ContextCompat.startService(application, CopyService.startIntent(application)) }
+        }
+    }
+
+    fun consumePendingCount(): Int? = pendingCount.also { pendingCount = null }
 
     fun save(draft: CellDraft, onResult: (Result<Long>) -> Unit) {
         viewModelScope.launch { onResult(runCatching { repository.save(draft) }) }
@@ -38,12 +54,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         startQueue(onError) { repository.queueSelection(cellId, selectedIds) }
     }
 
-    private fun startQueue(onError: (Throwable) -> Unit, prepare: suspend () -> Long) {
+    private fun startQueue(onError: (Throwable) -> Unit, prepare: suspend () -> Int) {
         viewModelScope.launch {
             runCatching {
-                prepare()
+                pendingCount = prepare()
                 val context = getApplication<Application>()
-                ContextCompat.startForegroundService(context, CopyService.startIntent(context))
+                ContextCompat.startService(context, CopyService.startIntent(context))
             }.onFailure(onError)
         }
     }

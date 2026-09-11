@@ -7,7 +7,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -30,6 +29,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -57,9 +57,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -71,6 +72,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -85,6 +87,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.clipcells.app.data.CellDraft
 import com.clipcells.app.data.CellWithMessages
+import com.clipcells.app.data.CopyQueueEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -97,16 +100,42 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private val MonoScheme = darkColorScheme(
+    primary = Color(0xFFFFFFFF),
+    onPrimary = Color(0xFF000000),
+    primaryContainer = Color(0xFFFFFFFF),
+    onPrimaryContainer = Color(0xFF000000),
+    secondary = Color(0xFFB3B3B3),
+    onSecondary = Color(0xFF000000),
+    secondaryContainer = Color(0xFF1C1C1C),
+    onSecondaryContainer = Color(0xFFF2F2F2),
+    background = Color(0xFF050505),
+    onBackground = Color(0xFFF2F2F2),
+    surface = Color(0xFF101010),
+    onSurface = Color(0xFFF2F2F2),
+    surfaceVariant = Color(0xFF1C1C1C),
+    onSurfaceVariant = Color(0xFF9E9E9E),
+    outline = Color(0xFF3A3A3A),
+    inverseSurface = Color(0xFFF2F2F2),
+    inverseOnSurface = Color(0xFF050505),
+)
+
 @Composable
 private fun ClipCellsTheme(content: @Composable () -> Unit) {
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
-    MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme(), content = content)
+    MaterialTheme(colorScheme = MonoScheme, content = content)
+}
+
+private fun copiedText(n: Int): String = when {
+    n % 10 == 1 && n % 100 != 11 -> "Скопировано $n сообщение"
+    n % 10 in 2..4 && n % 100 !in 12..14 -> "Скопировано $n сообщения"
+    else -> "Скопировано $n сообщений"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     val cells by vm.cells.collectAsStateWithLifecycle()
+    val queueState by vm.queue.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("display", 0) }
     var columns by remember { mutableIntStateOf(prefs.getInt("columns", 2).coerceIn(2, 5)) }
@@ -119,19 +148,42 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     var deleteConfirm by remember { mutableStateOf(false) }
     var selectedCells by remember { mutableStateOf(setOf<Long>()) }
     var error by remember { mutableStateOf<String?>(null) }
+    var lastQueue by remember { mutableStateOf<CopyQueueEntity?>(null) }
+    var permissionAsked by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     fun startCopy(block: () -> Unit) {
-        if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= 33 && !permissionAsked) {
+            permissionAsked = true
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         block()
+    }
+
+    LaunchedEffect(queueState) {
+        val previous = lastQueue
+        lastQueue = queueState
+        if (previous != null && queueState == null) {
+            val count = vm.consumePendingCount()
+            snackbar.showSnackbar(
+                message = count?.let(::copiedText) ?: "Копирование завершено",
+                duration = SnackbarDuration.Short,
+            )
+        }
     }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    actionIconContentColor = MaterialTheme.colorScheme.onBackground,
+                ),
                 title = { Text(if (mode == HomeMode.NORMAL) "ClipCells" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}") },
                 actions = {
                     if (mode == HomeMode.NORMAL) {
@@ -153,7 +205,11 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
         },
         floatingActionButton = {
             if (mode == HomeMode.NORMAL) {
-                FloatingActionButton(onClick = { editorCell = null; showEditor = true }) { Icon(Icons.Default.Add, "Создать ячейку") }
+                FloatingActionButton(
+                    onClick = { editorCell = null; showEditor = true },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                ) { Icon(Icons.Default.Add, "Создать ячейку") }
             }
         },
     ) { padding ->
@@ -256,11 +312,15 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
 @Composable
 private fun EmptyState(modifier: Modifier, onCreate: () -> Unit) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("Здесь появятся ваши ячейки", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text("Здесь появятся ваши ячейки", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onBackground)
         Spacer(Modifier.height(8.dp))
         Text("Создайте первую ячейку и добавьте сообщения", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(20.dp))
-        Button(onClick = onCreate) { Icon(Icons.Default.Add, null); Text(" Создать") }
+        Button(
+            onClick = onCreate,
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+        ) { Icon(Icons.Default.Add, null); Text(" Создать") }
     }
 }
 
@@ -273,11 +333,12 @@ private fun CellCard(
     onTap: () -> Unit,
     onHold: () -> Unit,
 ) {
-    val progress = remember(cell.cell.id) { Animatable(0f) }
+    val holdProgress = remember(cell.cell.id) { Animatable(0f) }
+    val press = remember(cell.cell.id) { Animatable(0f) }
     val haptic = LocalHapticFeedback.current
     val gestureScope = rememberCoroutineScope()
-    val shape = RoundedCornerShape(28.dp)
-    val accent = Color(cell.cell.colorArgb.toInt())
+    val shape = RoundedCornerShape(percent = 32)
+    val borderBrush = MaterialTheme.colorScheme.onBackground
     val gesture = Modifier.pointerInput(cell.cell.id, mode) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
@@ -285,42 +346,87 @@ private fun CellCard(
             var held = false
             val timer = gestureScope.launch {
                 try {
-                    progress.animateTo(1f, tween(2_700))
+                    press.animateTo(1f, tween(90))
+                    holdProgress.animateTo(1f, tween(2_700))
                     held = true
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     onHold()
                 } catch (_: CancellationException) {
-                    // удержание прервано раньше 2,7 с — диалог не открываем
+                    // жест прерван — диалог не открываем
                 }
             }
             val up = waitForUpOrCancellation()
             timer.cancel()
             if (up != null && !held && System.currentTimeMillis() - downTime < 600) {
+                haptic.performHapticFeedback(HapticFeedbackType.ContextClick)
                 onTap()
             }
-            gestureScope.launch { progress.snapTo(0f) }
+            gestureScope.launch {
+                holdProgress.snapTo(0f)
+                press.animateTo(0f, tween(140))
+            }
         }
     }
     Card(
-        modifier = Modifier.fillMaxWidth().height(height).then(gesture).border(
-            BorderStroke(if (selected) 3.dp else (1 + progress.value * 4).dp, if (selected) MaterialTheme.colorScheme.primary else accent.copy(alpha = 0.45f + progress.value * 0.55f)),
-            shape,
-        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .graphicsLayer {
+                scaleX = 1f - 0.05f * press.value
+                scaleY = 1f - 0.05f * press.value
+            }
+            .then(gesture)
+            .border(
+                BorderStroke(
+                    if (selected) 2.dp else 1.dp,
+                    if (selected) borderBrush else borderBrush.copy(alpha = 0.35f + holdProgress.value * 0.65f),
+                ),
+                shape,
+            ),
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = accent.copy(alpha = if (selected) 0.28f else 0.16f)),
+        colors = CardDefaults.cardColors(
+            containerColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+        ),
     ) {
-        Box(Modifier.fillMaxSize().padding(12.dp)) {
+        Box(Modifier.fillMaxSize()) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = press.value * 0.14f }
+                    .background(MaterialTheme.colorScheme.primary),
+            )
             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(cell.cell.name, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+                Text(
+                    cell.cell.name,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                )
                 Spacer(Modifier.height(4.dp))
-                Text("${cell.messages.size} сообщ.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "${cell.messages.size} сообщ.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             androidx.compose.animation.AnimatedVisibility(selected, Modifier.align(Alignment.TopEnd)) {
-                Box(Modifier.size(24.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(17.dp))
+                Box(
+                    Modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onPrimary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
                 }
             }
-            if (mode == HomeMode.EDIT) Text("Изменить", style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.BottomCenter))
+            if (mode == HomeMode.EDIT) {
+                Text(
+                    "Изменить",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
         }
     }
 }
@@ -332,13 +438,18 @@ private fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, o
     var interval by remember(source?.cell?.id) { mutableIntStateOf((source?.cell?.intervalMillis ?: 1_000L).toInt()) }
     var discardConfirm by remember { mutableStateOf(false) }
     Dialog(onDismissRequest = { discardConfirm = true }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxWidth(0.94f).fillMaxSize(0.9f), shape = RoundedCornerShape(28.dp), tonalElevation = 6.dp) {
+        Surface(
+            Modifier.fillMaxWidth(0.94f).fillMaxSize(0.9f),
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
             Column(Modifier.padding(20.dp)) {
-                Text(if (source == null) "Новая ячейка" else "Редактирование", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(if (source == null) "Новая ячейка" else "Редактирование", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(name, { name = it }, label = { Text("Название") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
-                Text("Сообщения — копируются сверху вниз", style = MaterialTheme.typography.labelLarge)
+                Text("Сообщения — копируются сверху вниз", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(messages.size) { index ->
                         val text = messages[index]
@@ -348,9 +459,13 @@ private fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, o
                         }
                     }
                 }
-                OutlinedButton(onClick = { messages.add("") }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Add, null); Text(" Добавить сообщение") }
+                OutlinedButton(
+                    onClick = { messages.add("") },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentColor = MaterialTheme.colorScheme.onBackground,
+                ) { Icon(Icons.Default.Add, null); Text(" Добавить сообщение") }
                 Spacer(Modifier.height(8.dp))
-                Text("Интервал: ${"%.1f".format(interval / 1000f)} сек.")
+                Text("Интервал: ${"%.1f".format(interval / 1000f)} сек.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 androidx.compose.material3.Slider(
                     value = interval.toFloat(),
                     onValueChange = { interval = ((it / 100).toInt() * 100).coerceIn(300, 3_000) },
@@ -378,9 +493,9 @@ private fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, o
 private fun MessageSelectorDialog(cell: CellWithMessages, onDismiss: () -> Unit, onCopy: (List<Long>) -> Unit) {
     var selected by remember(cell.cell.id) { mutableStateOf(listOf<Long>()) }
     Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(28.dp), tonalElevation = 8.dp) {
+        Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) {
             Column(Modifier.padding(18.dp)) {
-                Text(cell.cell.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(cell.cell.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Text("Выберите сообщения в нужном порядке", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
                 LazyVerticalGrid(
@@ -394,11 +509,27 @@ private fun MessageSelectorDialog(cell: CellWithMessages, onDismiss: () -> Unit,
                         Card(
                             onClick = { selected = if (order >= 0) selected - message.id else selected + message.id },
                             modifier = Modifier.height(92.dp),
-                            colors = CardDefaults.cardColors(containerColor = if (order >= 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant),
+                            shape = RoundedCornerShape(percent = 32),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (order >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            ),
                         ) {
                             Box(Modifier.fillMaxSize().padding(8.dp)) {
-                                Text(message.text, maxLines = 4, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                                if (order >= 0) Text("${order + 1}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.align(Alignment.BottomEnd))
+                                Text(
+                                    message.text,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (order >= 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (order >= 0) {
+                                    Text(
+                                        "${order + 1}",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.align(Alignment.BottomEnd),
+                                    )
+                                }
                             }
                         }
                     }

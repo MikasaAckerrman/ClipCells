@@ -67,11 +67,19 @@ class CellRepository(private val db: ClipCellsDatabase) {
         }
     }
 
-    suspend fun queueWholeCell(cellId: Long): Long = queue(cellId, null)
+    suspend fun queueWholeCell(cellId: Long): Int = queue(cellId, null)
 
-    suspend fun queueSelection(cellId: Long, selectedIds: List<Long>): Long = queue(cellId, selectedIds)
+    suspend fun queueSelection(cellId: Long, selectedIds: List<Long>): Int = queue(cellId, selectedIds)
 
-    private suspend fun queue(cellId: Long, selectedIds: List<Long>?): Long {
+    suspend fun unfinishedQueueSize(): Int? = db.withTransaction {
+        val q = queues.getQueue() ?: return@withTransaction null
+        val items = queues.getItems()
+        if (items.isNotEmpty() && q.nextIndex < items.size) items.size else null
+    }
+
+    fun observeQueue(): Flow<CopyQueueEntity?> = queues.observeQueue()
+
+    private suspend fun queue(cellId: Long, selectedIds: List<Long>?): Int {
         val stored = requireNotNull(cells.get(cellId)) { "Ячейка не найдена" }
         val cell = Cell(
             id = stored.cell.id,
@@ -83,6 +91,7 @@ class CellRepository(private val db: ClipCellsDatabase) {
             messages = stored.messages.map { CellMessage(it.id, it.text, it.position) },
         )
         val plan = if (selectedIds == null) plans.forWholeCell(cell) else plans.forSelection(cell, selectedIds)
+        val size = plan.items.size
 
         return db.withTransaction {
             val revision = (queues.getQueue()?.revision ?: 0L) + 1L
@@ -98,7 +107,7 @@ class CellRepository(private val db: ClipCellsDatabase) {
             queues.putItems(plan.items.mapIndexed { index, item ->
                 CopyQueueItemEntity(position = index, sourceMessageId = item.sourceMessageId, text = item.text)
             })
-            revision
+            size
         }
     }
 }

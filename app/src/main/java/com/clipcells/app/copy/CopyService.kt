@@ -14,8 +14,13 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.clipcells.app.MainActivity
 import com.clipcells.app.data.ClipCellsDatabase
+import com.clipcells.app.data.CopyQueueEntity
+import com.clipcells.app.data.CopyQueueItemEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,13 +33,28 @@ import kotlinx.coroutines.launch
 class CopyService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var activeJob: Job? = null
+    private var inForeground = false
+    private var appInForeground = true
     private val queueDao by lazy { ClipCellsDatabase.get(this).queueDao() }
     private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
     private val notifications by lazy { getSystemService(NotificationManager::class.java) }
 
+    private val appObserver = LifecycleEventObserver { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_RESUME -> appInForeground = true
+            Lifecycle.Event.ON_STOP -> {
+                appInForeground = false
+                promoteIfRunning()
+            }
+            else -> Unit
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        appInForeground = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(appObserver)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -42,13 +62,11 @@ class CopyService : Service() {
             activeJob?.cancel()
             scope.launch {
                 queueDao.deleteQueue()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                stopNow()
             }
             return START_NOT_STICKY
         }
 
-        enterForeground(notification("ClipCells", "Подготовка…", 0, 0))
         activeJob?.cancel()
         activeJob = scope.launch { runQueue() }
         return START_STICKY
@@ -61,6 +79,7 @@ class CopyService : Service() {
             queueDao.finish(queue.revision)
             return stopNow()
         }
+        if (!appInForeground) promote(queue, items)
 
         try {
             for (index in queue.nextIndex until items.size) {
@@ -70,7 +89,12 @@ class CopyService : Service() {
                 val item = items[index]
                 clipboard.setPrimaryClip(ClipData.newPlainText(queue.title, item.text))
                 if (queueDao.advance(queue.revision, index + 1) == 0) return
-                notifications.notify(NOTIFICATION_ID, notification(queue.title, "Скопировано ${index + 1} из ${items.size}", index + 1, items.size))
+                if (inForeground) {
+                    notifications.notify(
+                        NOTIFICATION_ID,
+                        notification(queue.title, "Осталось ${items.size - index - 1}", index + 1, items.size),
+                    )
+                }
                 if (index < items.lastIndex) delay(queue.intervalMillis)
             }
             queueDao.finish(queue.revision)
@@ -80,9 +104,27 @@ class CopyService : Service() {
         }
     }
 
-    private fun enterForeground(notification: Notification) {
+    private fun promoteIfRunning() {
+        if (inForeground) return
+        val job = activeJob ?: return
+        if (!job.isActive) return
+        scope.launch {
+            val queue = queueDao.getQueue() ?: return@launch
+            promote(queue, queueDao.getItems())
+        }
+    }
+
+    private fun promote(queue: CopyQueueEntity, items: List<CopyQueueItemEntity>) {
+        if (inForeground) return
+        enterForeground(
+            notification(queue.title, "Осталось ${items.size - queue.nextIndex}", queue.nextIndex, items.size),
+        )
+    }
+
+    private fun enterForeground(n: Notification) {
+        inForeground = true
         val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, n, type)
     }
 
     private fun notification(title: String, text: String, progress: Int, max: Int): Notification {
@@ -113,19 +155,23 @@ class CopyService : Service() {
 
     private fun createChannel() {
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Очередь копирования", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Показывает прогресс последовательного копирования"
+            NotificationChannel(CHANNEL_ID, "Очередь копирования", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "Показывает прогресс последовательного копирования в фоне"
                 setSound(null, null)
             },
         )
     }
 
     private fun stopNow() {
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        if (inForeground) {
+            inForeground = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        }
         stopSelf()
     }
 
     override fun onDestroy() {
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(appObserver)
         scope.cancel()
         super.onDestroy()
     }

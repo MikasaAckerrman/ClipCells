@@ -102,6 +102,7 @@ interface CellDao {
 @Dao
 interface QueueDao {
     @Query("SELECT * FROM copy_queue WHERE id = 1") suspend fun getQueue(): CopyQueueEntity?
+    @Query("SELECT * FROM copy_queue WHERE id = 1") fun observeQueue(): Flow<CopyQueueEntity?>
     @Query("SELECT * FROM copy_queue_items WHERE queueId = 1 ORDER BY position")
     suspend fun getItems(): List<CopyQueueItemEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putQueue(queue: CopyQueueEntity)
