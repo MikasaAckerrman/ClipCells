@@ -5,6 +5,12 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val ciStoreFile: String? = System.getenv("CLIPCELLS_STORE_FILE")
+val ciStorePassword: String? = System.getenv("CLIPCELLS_STORE_PASSWORD")
+val stableSigningAvailable: Boolean = ciStoreFile != null &&
+    ciStorePassword != null &&
+    file(ciStoreFile).exists()
+
 android {
     namespace = "com.clipcells.app"
     compileSdk = 35
@@ -13,8 +19,19 @@ android {
         applicationId = "com.clipcells.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
+    }
+
+    signingConfigs {
+        if (stableSigningAvailable) {
+            create("ci") {
+                storeFile = file(ciStoreFile!!)
+                storePassword = ciStorePassword
+                keyAlias = "clipcells"
+                keyPassword = ciStorePassword
+            }
+        }
     }
 
     buildFeatures { compose = true }
@@ -27,6 +44,20 @@ android {
     kotlinOptions { jvmTarget = "17" }
 
     packaging.resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+}
+
+buildTypes {
+    release {
+        isMinifyEnabled = false
+        if (stableSigningAvailable) {
+            signingConfig = signingConfigs.getByName("ci")
+        }
+    }
+    debug {
+        if (stableSigningAvailable) {
+            signingConfig = signingConfigs.getByName("ci")
+        }
+    }
 }
 
 dependencies {
@@ -52,5 +83,4 @@ dependencies {
 
     ksp("androidx.room:room-compiler:2.7.0")
     testImplementation(kotlin("test"))
-    testImplementation("junit:junit:4.13.2")
 }

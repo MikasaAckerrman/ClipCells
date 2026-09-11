@@ -38,6 +38,22 @@ class CopyService : Service() {
     private val queueDao by lazy { ClipCellsDatabase.get(this).queueDao() }
     private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
     private val notifications by lazy { getSystemService(NotificationManager::class.java) }
+    private val openIntent by lazy {
+        PendingIntent.getActivity(
+            this,
+            1,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+    private val cancelIntent by lazy {
+        PendingIntent.getService(
+            this,
+            2,
+            Intent(this, CopyService::class.java).setAction(ACTION_CANCEL),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
 
     private val appObserver = LifecycleEventObserver { _, event ->
         when (event) {
@@ -128,28 +144,16 @@ class CopyService : Service() {
     }
 
     private fun notification(title: String, text: String, progress: Int, max: Int): Notification {
-        val open = PendingIntent.getActivity(
-            this,
-            1,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val cancel = PendingIntent.getService(
-            this,
-            2,
-            Intent(this, CopyService::class.java).setAction(ACTION_CANCEL),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_save)
             .setContentTitle(title)
             .setContentText(text)
-            .setContentIntent(open)
+            .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .apply { if (max > 0) setProgress(max, progress, false) else setProgress(0, 0, true) }
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отменить", cancel)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отменить", cancelIntent)
             .build()
     }
 

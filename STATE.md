@@ -1,38 +1,37 @@
 # STATE.md — ClipCells
 
-- date: 2026-09-11
-- local: master 351db2a, develop 9a0031f (HEAD), dirty: нет
+- date: 2026-09-11 (v0.2)
+- local: develop 1a9a24e, dirty: нет
 - remote: github.com/MikasaAckerrman/ClipCells (private), default=develop
-- CI: run 34576280745 SUCCESS (core tests + assembleDebug), APK 17 MB артефакт
+- CI: run 34584034531 SUCCESS, APK v0.2.0 (11 MB, без material-icons-extended)
 - build: :app:assembleDebug зелёный; :core:test 6/6 зелёный
 
-## Готово (фундамент)
-Модели+CopyPlanFactory (:core, 6 тестов), Room (cells/messages/copy_queue), CellRepository,
-CopyService (specialUse FGS, очередь в БД, revision), MainViewModel, Compose UI:
-главная сетка 2×3 (настройки 2–5×3–8), редактор (имя, сообщения, интервал 0,3–3 с),
-удержание 2,7 с + прогресс, выбор сообщений 3×3 с нумерацией, карандаш/корзина,
-удаление с подтверждением и Undo 5 с, экспорт/импорт — НЕТ (не начат), блокировка — НЕТ.
+## Проверено на устройстве (v0.2)
+- Тап по ячейке «minis» (3 сообщ.) → подсказка «Скопировано 3 сообщения» в приложении ✓
+- Системного уведомления при копировании НЕТ (список уведомлений пуст) ✓
+- Финальный буфер = третье сообщение очереди (фрагмент протокола) ✓
+- Установка: mount projectGITHUB → shizuku exec cat → /data/local/tmp → pm install (cp НЕ перезаписывает файл — использовать cat >)
 
-## Проверено на устройстве (iQOO Neo 10 / OriginOS 6)
-- APK установлен через Shizuku pm install (uid 2000, юзер подтверждает диалог).
-- Приложение запускается, редактор работает, ячейка сохранена юзером («текст», 2 сообщ.) — юзер подтвердил: работает.
-- Сеть: нет INTERNET permission (манифест проверен), allowBackup=false.
+## Изменения v0.2
+- Уведомление только при уходе в фон (ProcessLifecycleOwner → FGS specialUse), в приложении — snackbar
+- Восстановление очереди: VM init → unfinishedQueueSize → startService (продолжение с nextIndex)
+- Монохром тема (чёрный #050505/белый), fixed dark; squircle percent=32; пресс-волна + scale
+- values-v31 splash background #050505 → белый экран старта убран
+- Убраны: material-icons-extended, vectorDrawables, ContextCompat.startForegroundService
 
-## Не проверено (блокеры следующего захода)
-- Фоновая очередь: FGS-уведомление «N из M» после сворачивания НЕ тестировалось.
-- Сохранение промежуточных записей в истории Gboard НЕ тестировалось.
-- OriginOS убивает фоновый процесс без FGS (наблюдалось) — FGS должен это лечить, проверить.
-- Удержание 2,7 с, выбор 3×3, Undo, экспорт/импорт — ручные тесты не пройдены.
+## Не проверено
+- Gboard история: все 3 записи отдельными элементами (нужен ClipCells на переднем плане + поле ввода)
+- Удержание 2,7 с → окно 3×3, выбор, Undo удаления — ручные
+- Мигание статус-бара: уведомление убрано (корневая причина), визуально подтвердить юзеру
 
 ## next
-1. Тест очереди в фоне (3 сообщения, свернуть, буфер после).
-2. Удержание/выбор/Undo ручным прогоном.
-3. Экспорт/импорт (модуль в репо), блокировка PIN/биометрия.
-4. Полировка анимаций и цветов, иконка приложения.
+1. Тест Gboard-истории на устройстве.
+2. Ручной прогон: удержание/выбор/Undo/фоновая очередь с уведомлением.
+3. Экспорт/импорт, блокировка PIN/биометрия.
+4. Список доработок от юзера (обещал скинуть).
 
 ## Инфраструктура
-- Сборка только CI (Android SDK в PRoot нет). gradle/actions/setup-gradle@v4 + temurin 21.
 - git-guard запрещает push в master — работать в develop, CI на все ветки.
-- KSP подключён resolutionStrategy на symbol-processing-gradle-plugin (маркер на портале 404).
-- Установка: cp в /var/minis/mounts/projectGITHUB → shizuku exec cp /data/local/tmp → pm install.
-- APK копия: /var/minis/mounts/projectGITHUB/clipcells-app-debug.apk
+- KSP подключён resolutionStrategy (маркер на портале 404). Room 2.7.0 + KSP1 1.0.31 — работает.
+- CI: gradle/actions/setup-gradle@v4 + temurin 21; артефакт ClipCells-debug-apk.
+- Установка: cp в /var/minis/mounts/projectGITHUB → shizuku exec cat > /data/local/tmp → pm install.
