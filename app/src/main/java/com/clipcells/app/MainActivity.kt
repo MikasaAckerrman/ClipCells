@@ -298,7 +298,7 @@ private fun CellCard(
             if (up != null && !held && System.currentTimeMillis() - downTime < 600) {
                 onTap()
             }
-            progress.snapTo(0f)
+            gestureScope.launch { progress.snapTo(0f) }
         }
     }
     Card(
@@ -315,7 +315,7 @@ private fun CellCard(
                 Spacer(Modifier.height(4.dp))
                 Text("${cell.messages.size} сообщ.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            AnimatedVisibility(selected, Modifier.align(Alignment.TopEnd)) {
+            androidx.compose.animation.AnimatedVisibility(selected, Modifier.align(Alignment.TopEnd)) {
                 Box(Modifier.size(24.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(17.dp))
                 }

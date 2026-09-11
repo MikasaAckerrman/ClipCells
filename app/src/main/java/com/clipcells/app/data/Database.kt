@@ -116,7 +116,7 @@ interface QueueDao {
 @Database(
     entities = [CellEntity::class, MessageEntity::class, CopyQueueEntity::class, CopyQueueItemEntity::class],
     version = 1,
-    exportSchema = true,
+    exportSchema = false,
 )
 abstract class ClipCellsDatabase : RoomDatabase() {
     abstract fun cellDao(): CellDao
