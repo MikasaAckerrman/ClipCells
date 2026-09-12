@@ -40,6 +40,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -102,6 +106,8 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
     var interval by remember(source?.cell?.id) { mutableIntStateOf(initialInterval) }
     var discardConfirm by remember { mutableStateOf(false) }
     var lastAddedId by remember { mutableLongStateOf(Long.MIN_VALUE) }
+    var lastDeletedMessage by remember { mutableStateOf<Pair<Int, MessageDraft>?>(null) }
+    val editorSnackbar = remember { SnackbarHostState() }
 
     val dirty = name != initialName || messages.map { it.text.trim() } != initialMessages || interval != initialInterval
     fun requestClose() = if (dirty) { discardConfirm = true } else onDismiss()
@@ -149,9 +155,9 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Сообщения — тяните ≡ для перестановки",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "Тяните строку для перестановки",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 )
                 LazyColumn(
                     state = listState,
@@ -209,7 +215,25 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                                 autoFocus = item.id == lastAddedId,
                             )
                             IconButton(
-                                onClick = { if (messages.size > 1) messages.removeAt(index) },
+                                onClick = {
+                                    if (messages.size > 1) {
+                                        val deleted = messages.removeAt(index)
+                                        lastDeletedMessage = index to deleted
+                                        scope.launch {
+                                            val action = editorSnackbar.showSnackbar(
+                                                "Сообщение удалено",
+                                                "Отменить",
+                                                duration = SnackbarDuration.Short,
+                                            )
+                                            if (action == SnackbarResult.ActionPerformed) {
+                                                lastDeletedMessage?.let { (pos, msg) ->
+                                                    messages.add(pos.coerceAtMost(messages.size), msg)
+                                                    lastDeletedMessage = null
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
                                 enabled = messages.size > 1,
                             ) { Icon(Icons.Default.Close, "Удалить сообщение") }
                         }
@@ -237,6 +261,7 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                         onSave(CellDraft(source?.cell?.id, name, messages.map { it.text }, source?.cell?.colorArgb ?: 0xFF6750A4, source?.cell?.icon, interval.toLong()))
                     }) { Text("Сохранить") }
                 }
+                SnackbarHost(editorSnackbar)
             }
         }
     }

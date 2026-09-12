@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -144,8 +145,11 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                             ),
                         )
                     } else {
-                        Text(if (mode == HomeMode.NORMAL) "ClipCells (${cells?.size ?: 0})" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}")                    }
-                },
+                        Text(
+                            if (mode == HomeMode.NORMAL) "ClipCells (${cells?.size ?: 0})" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}",
+                            modifier = Modifier.clickable { mode = HomeMode.NORMAL; selectedCells = emptySet() },
+                        )
+                    }
                 actions = {
                     if (showSearch && mode == HomeMode.NORMAL) {
                         IconButton(onClick = { showSearch = false; searchQuery = "" }) { Icon(Icons.Default.Close, "Закрыть поиск") }
