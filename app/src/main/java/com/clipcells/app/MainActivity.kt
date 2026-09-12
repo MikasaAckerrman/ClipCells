@@ -144,8 +144,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                             ),
                         )
                     } else {
-                        Text(if (mode == HomeMode.NORMAL) "ClipCells" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}")
-                    }
+                        Text(if (mode == HomeMode.NORMAL) "ClipCells (${cells.size})" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}")                    }
                 },
                 actions = {
                     if (showSearch && mode == HomeMode.NORMAL) {
