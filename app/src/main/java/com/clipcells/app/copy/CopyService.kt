@@ -68,8 +68,7 @@ class CopyService : Service() {
             return stopSelf()
         }
 
-        try {
-            for (index in queue.nextIndex until items.size) {
+        for (index in queue.nextIndex until items.size) {
                 val current = queueDao.getQueue()
                 if (current?.revision != queue.revision) return
 
