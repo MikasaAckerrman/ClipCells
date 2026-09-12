@@ -150,6 +150,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                             modifier = Modifier.clickable { mode = HomeMode.NORMAL; selectedCells = emptySet() },
                         )
                     }
+                },
                 actions = {
                     if (showSearch && mode == HomeMode.NORMAL) {
                         IconButton(onClick = { showSearch = false; searchQuery = "" }) { Icon(Icons.Default.Close, "Закрыть поиск") }
