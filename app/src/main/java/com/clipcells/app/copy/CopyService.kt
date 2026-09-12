@@ -1,26 +1,15 @@
 package com.clipcells.app.copy
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
-import com.clipcells.app.MainActivity
 import com.clipcells.app.data.ClipCellsDatabase
-import com.clipcells.app.data.CopyQueueEntity
-import com.clipcells.app.data.CopyQueueItemEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,46 +19,30 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/**
+ * Пишет элементы очереди в системный буфер с интервалом.
+ * Android 10+ игнорирует setPrimaryClip у приложения без фокуса (проверено на устройстве),
+ * поэтому при уходе приложения в фон очередь останавливается и продолжается при возврате —
+ * прогресс хранится в БД (nextIndex), повторы записей исключены.
+ */
 class CopyService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var activeJob: Job? = null
-    private var inForeground = false
-    private var appInForeground = true
     private val queueDao by lazy { ClipCellsDatabase.get(this).queueDao() }
     private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
-    private val notifications by lazy { getSystemService(NotificationManager::class.java) }
-    private val openIntent by lazy {
-        PendingIntent.getActivity(
-            this,
-            1,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
-    private val cancelIntent by lazy {
-        PendingIntent.getService(
-            this,
-            2,
-            Intent(this, CopyService::class.java).setAction(ACTION_CANCEL),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-    }
 
     private val appObserver = LifecycleEventObserver { _, event ->
-        when (event) {
-            Lifecycle.Event.ON_RESUME -> appInForeground = true
-            Lifecycle.Event.ON_STOP -> {
-                appInForeground = false
-                promoteIfRunning()
+        if (event == Lifecycle.Event.ON_STOP) {
+            val job = activeJob
+            if (job?.isActive == true) {
+                job.cancel()
+                stopSelf()
             }
-            else -> Unit
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-        createChannel()
-        appInForeground = ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
         ProcessLifecycleOwner.get().lifecycle.addObserver(appObserver)
     }
 
@@ -78,24 +51,23 @@ class CopyService : Service() {
             activeJob?.cancel()
             scope.launch {
                 queueDao.deleteQueue()
-                stopNow()
+                stopSelf()
             }
             return START_NOT_STICKY
         }
 
         activeJob?.cancel()
         activeJob = scope.launch { runQueue() }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private suspend fun runQueue() {
-        val queue = queueDao.getQueue() ?: return stopNow()
+        val queue = queueDao.getQueue() ?: return stopSelf()
         val items = queueDao.getItems()
         if (items.isEmpty() || queue.nextIndex !in 0..items.size) {
             queueDao.finish(queue.revision)
-            return stopNow()
+            return stopSelf()
         }
-        if (!appInForeground) promote(queue, items)
 
         try {
             for (index in queue.nextIndex until items.size) {
@@ -105,73 +77,13 @@ class CopyService : Service() {
                 val item = items[index]
                 clipboard.setPrimaryClip(ClipData.newPlainText(queue.title, item.text))
                 if (queueDao.advance(queue.revision, index + 1) == 0) return
-                if (inForeground) {
-                    notifications.notify(
-                        NOTIFICATION_ID,
-                        notification(queue.title, "Осталось ${items.size - index - 1}", index + 1, items.size),
-                    )
-                }
                 if (index < items.lastIndex) delay(queue.intervalMillis)
             }
             queueDao.finish(queue.revision)
-            stopNow()
+            stopSelf()
         } catch (_: CancellationException) {
             throw CancellationException()
         }
-    }
-
-    private fun promoteIfRunning() {
-        if (inForeground) return
-        val job = activeJob ?: return
-        if (!job.isActive) return
-        scope.launch {
-            val queue = queueDao.getQueue() ?: return@launch
-            promote(queue, queueDao.getItems())
-        }
-    }
-
-    private fun promote(queue: CopyQueueEntity, items: List<CopyQueueItemEntity>) {
-        if (inForeground) return
-        enterForeground(
-            notification(queue.title, "Осталось ${items.size - queue.nextIndex}", queue.nextIndex, items.size),
-        )
-    }
-
-    private fun enterForeground(n: Notification) {
-        inForeground = true
-        val type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, n, type)
-    }
-
-    private fun notification(title: String, text: String, progress: Int, max: Int): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_save)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setContentIntent(openIntent)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setSilent(true)
-            .apply { if (max > 0) setProgress(max, progress, false) else setProgress(0, 0, true) }
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Отменить", cancelIntent)
-            .build()
-    }
-
-    private fun createChannel() {
-        notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Очередь копирования", NotificationManager.IMPORTANCE_MIN).apply {
-                description = "Показывает прогресс последовательного копирования в фоне"
-                setSound(null, null)
-            },
-        )
-    }
-
-    private fun stopNow() {
-        if (inForeground) {
-            inForeground = false
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        }
-        stopSelf()
     }
 
     override fun onDestroy() {
@@ -185,8 +97,6 @@ class CopyService : Service() {
     companion object {
         const val ACTION_START = "com.clipcells.app.action.START_COPY"
         const val ACTION_CANCEL = "com.clipcells.app.action.CANCEL_COPY"
-        private const val CHANNEL_ID = "copy_queue"
-        private const val NOTIFICATION_ID = 4101
 
         fun startIntent(context: Context) = Intent(context, CopyService::class.java).setAction(ACTION_START)
     }

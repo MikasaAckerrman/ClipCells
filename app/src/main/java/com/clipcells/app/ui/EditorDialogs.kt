@@ -72,6 +72,7 @@ private fun MonoField(
     caption: String,
     modifier: Modifier = Modifier,
     singleLine: Boolean = false,
+    fieldHeight: androidx.compose.ui.unit.Dp = 44.dp,
 ) {
     var focused by remember { mutableStateOf(false) }
     val border = if (focused) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
@@ -83,13 +84,13 @@ private fun MonoField(
             value = value,
             onValueChange = onValueChange,
             singleLine = singleLine,
-            minLines = if (singleLine) 1 else 2,
-            maxLines = if (singleLine) 1 else 3,
+            minLines = if (singleLine) 1 else 3,
+            maxLines = if (singleLine) 1 else 4,
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (singleLine) 44.dp else 68.dp)
+                .height(fieldHeight)
                 .drawBehind {
                     drawRoundRect(
                         color = border,
@@ -163,6 +164,7 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                                 onValueChange = { messages[index] = it },
                                 caption = "Сообщение ${index + 1}",
                                 modifier = Modifier.weight(1f),
+                                fieldHeight = 88.dp,
                             )
                             IconButton(onClick = { if (messages.size > 1) messages.removeAt(index) }, enabled = messages.size > 1) {
                                 Icon(Icons.Default.Close, "Удалить сообщение")

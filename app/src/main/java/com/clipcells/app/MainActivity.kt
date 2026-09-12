@@ -1,12 +1,8 @@
 package com.clipcells.app
 
-import android.Manifest
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -94,18 +90,8 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     var selectedCells by remember { mutableStateOf(setOf<Long>()) }
     var error by remember { mutableStateOf<String?>(null) }
     var lastQueue by remember { mutableStateOf<CopyQueueEntity?>(null) }
-    var permissionAsked by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-
-    fun startCopy(block: () -> Unit) {
-        if (Build.VERSION.SDK_INT >= 33 && !permissionAsked) {
-            permissionAsked = true
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        block()
-    }
 
     LaunchedEffect(queueState) {
         val previous = lastQueue
@@ -177,7 +163,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                             selected = cell.cell.id in selectedCells,
                             onTap = {
                                 when (mode) {
-                                    HomeMode.NORMAL -> startCopy { vm.copyWhole(cell.cell.id) { error = it.message } }
+                                    HomeMode.NORMAL -> vm.copyWhole(cell.cell.id) { error = it.message }
                                     HomeMode.EDIT -> { editorCell = cell; showEditor = true }
                                     HomeMode.DELETE -> selectedCells = if (cell.cell.id in selectedCells) selectedCells - cell.cell.id else selectedCells + cell.cell.id
                                 }
@@ -213,7 +199,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
             onDismiss = { selectorCell = null },
             onCopy = { ids ->
                 selectorCell = null
-                if (ids.isNotEmpty()) startCopy { vm.copySelected(cell.cell.id, ids) { error = it.message } }
+                if (ids.isNotEmpty()) vm.copySelected(cell.cell.id, ids) { error = it.message }
             },
         )
     }
