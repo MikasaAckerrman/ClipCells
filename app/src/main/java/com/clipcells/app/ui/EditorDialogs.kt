@@ -113,7 +113,7 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
     // drag-reorder state
     val draggedIndex = remember { mutableIntStateOf(-1) }
     val dragAccum = remember { mutableFloatStateOf(0f) }
-    val stridePx = with(LocalDensity.current) { 114.dp.toPx() }
+    val stridePx = with(LocalDensity.current) { 57.dp.toPx() }
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
 
     Box(
@@ -166,40 +166,39 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                                 .graphicsLayer {
                                     alpha = if (draggedIndex.intValue == index) 0.85f else 1f
                                     shadowElevation = if (draggedIndex.intValue == index) 12f else 0f
+                                }
+                                .pointerInput(item.id) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            draggedIndex.intValue = index
+                                            dragAccum.floatValue = 0f
+                                        },
+                                        onDrag = { _, dragAmount ->
+                                            val current = draggedIndex.intValue
+                                            if (current < 0) return@detectDragGestures
+                                            dragAccum.floatValue += dragAmount.y
+                                            if (dragAccum.floatValue > stridePx && current < messages.lastIndex) {
+                                                Collections.swap(messages, current, current + 1)
+                                                draggedIndex.intValue = current + 1
+                                                dragAccum.floatValue -= stridePx
+                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            } else if (dragAccum.floatValue < -stridePx && current > 0) {
+                                                Collections.swap(messages, current, current - 1)
+                                                draggedIndex.intValue = current - 1
+                                                dragAccum.floatValue += stridePx
+                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            }
+                                        },
+                                        onDragEnd = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
+                                        onDragCancel = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
+                                    )
                                 },
                         ) {
                             Icon(
                                 Icons.Default.Menu,
                                 "Перетащить",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .pointerInput(item.id) {
-                                        detectDragGestures(
-                                            onDragStart = {
-                                                draggedIndex.intValue = index
-                                                dragAccum.floatValue = 0f
-                                            },
-                                            onDrag = { _, dragAmount ->
-                                                val current = draggedIndex.intValue
-                                                if (current < 0) return@detectDragGestures
-                                                dragAccum.floatValue += dragAmount.y
-                                                if (dragAccum.floatValue > stridePx && current < messages.lastIndex) {
-                                                    Collections.swap(messages, current, current + 1)
-                                                    draggedIndex.intValue = current + 1
-                                                    dragAccum.floatValue -= stridePx
-                                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                                } else if (dragAccum.floatValue < -stridePx && current > 0) {
-                                                    Collections.swap(messages, current, current - 1)
-                                                    draggedIndex.intValue = current - 1
-                                                    dragAccum.floatValue += stridePx
-                                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                                }
-                                            },
-                                            onDragEnd = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
-                                            onDragCancel = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
-                                        )
-                                    },
+                                modifier = Modifier.size(32.dp),
                             )
                             MonoField(
                                 value = item.text,
