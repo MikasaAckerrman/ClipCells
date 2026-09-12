@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -133,7 +132,6 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .fillMaxHeight(0.95f)
-                .imePadding()
                 .pointerInput(Unit) { detectTapGestures { } },
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -153,6 +151,8 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)))
                 Spacer(Modifier.height(10.dp))
                 Text(
                     "Тяните строку для перестановки",

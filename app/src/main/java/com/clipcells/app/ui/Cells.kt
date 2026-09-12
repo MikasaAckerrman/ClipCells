@@ -159,7 +159,7 @@ internal fun CellCard(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "${cell.messages.size} сообщ.",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelSmall,
                     color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

@@ -226,10 +226,10 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     ) {
         CellEditorDialog(
             source = editorCell,
-            onDismiss = { showEditor = false },
+            onDismiss = { showEditor = false; mode = HomeMode.NORMAL },
             onSave = { draft ->
                 vm.save(draft) { result ->
-                    result.onSuccess { showEditor = false }.onFailure { error = it.message }
+                    result.onSuccess { showEditor = false; mode = HomeMode.NORMAL }.onFailure { error = it.message }
                 }
             },
         )
