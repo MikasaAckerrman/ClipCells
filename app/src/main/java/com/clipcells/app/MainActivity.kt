@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -36,6 +38,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -46,6 +50,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -90,6 +95,12 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     var selectedCells by remember { mutableStateOf(setOf<Long>()) }
     var error by remember { mutableStateOf<String?>(null) }
     var lastQueue by remember { mutableStateOf<CopyQueueEntity?>(null) }
+    var showSearch by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredCells = remember(cells, searchQuery) {
+        if (searchQuery.isBlank()) cells
+        else cells.filter { it.cell.name.contains(searchQuery, ignoreCase = true) }
+    }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -115,9 +126,31 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
                     actionIconContentColor = MaterialTheme.colorScheme.onBackground,
                 ),
-                title = { Text(if (mode == HomeMode.NORMAL) "ClipCells" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}") },
+                title = {
+                    if (showSearch && mode == HomeMode.NORMAL) {
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            placeholder = { Text("Поиск ячеек…", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent,
+                                cursorColor = MaterialTheme.colorScheme.onBackground,
+                            ),
+                        )
+                    } else {
+                        Text(if (mode == HomeMode.NORMAL) "ClipCells" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}")
+                    }
+                },
                 actions = {
-                    if (mode == HomeMode.NORMAL) {
+                    if (showSearch && mode == HomeMode.NORMAL) {
+                        IconButton(onClick = { showSearch = false; searchQuery = "" }) { Icon(Icons.Default.Close, "Закрыть поиск") }
+                    } else if (mode == HomeMode.NORMAL) {
+                        IconButton(onClick = { showSearch = true }) { Icon(Icons.Default.Search, "Поиск") }
                         IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "Настройки") }
                         IconButton(onClick = { mode = HomeMode.EDIT }) { Icon(Icons.Default.Edit, "Редактировать") }
                         IconButton(onClick = { mode = HomeMode.DELETE; selectedCells = emptySet() }, enabled = cells.isNotEmpty()) {
@@ -144,8 +177,14 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
             }
         },
     ) { padding ->
-        if (cells.isEmpty()) {
-            EmptyState(Modifier.fillMaxSize().padding(padding), onCreate = { editorCell = null; showEditor = true })
+        if (filteredCells.isEmpty()) {
+            if (cells.isEmpty()) {
+                EmptyState(Modifier.fillMaxSize().padding(padding), onCreate = { editorCell = null; showEditor = true })
+            } else {
+                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                    Text("Ничего не найдено", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         } else {
             BoxWithConstraints(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
                 val cardHeight = ((maxHeight - 12.dp * (visibleRows - 1)) / visibleRows).coerceAtLeast(64.dp)
@@ -155,7 +194,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(cells, key = { it.cell.id }, contentType = { "cell" }) { cell ->
+                    items(filteredCells, key = { it.cell.id }, contentType = { "cell" }) { cell ->
                         CellCard(
                             cell = cell,
                             height = cardHeight,

@@ -2,6 +2,7 @@ package com.clipcells.app.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -38,10 +41,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,19 +56,176 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.clipcells.app.data.CellDraft
 import com.clipcells.app.data.CellWithMessages
+import kotlinx.coroutines.launch
+import java.util.Collections
 
 internal fun copiedText(n: Int): String = when {
     n % 10 == 1 && n % 100 != 11 -> "Скопировано $n сообщение"
     n % 10 in 2..4 && n % 100 !in 12..14 -> "Скопировано $n сообщения"
     else -> "Скопировано $n сообщений"
+}
+
+private data class MessageDraft(val id: Long, val text: String)
+
+@Composable
+internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, onSave: (CellDraft) -> Unit) {
+    val initialName = remember(source?.cell?.id) { source?.cell?.name.orEmpty().trim() }
+    val initialMessages = remember(source?.cell?.id) { source?.orderedMessages?.map { it.text } ?: listOf("") }
+    val initialInterval = remember(source?.cell?.id) { (source?.cell?.intervalMillis ?: 1_000L).toInt() }
+    var nextId by remember { mutableLongStateOf(-1L) }
+    var name by remember(source?.cell?.id) { mutableStateOf(initialName) }
+    val messages = remember(source?.cell?.id) {
+        mutableStateListOf<MessageDraft>().apply {
+            addAll(
+                if (source == null) listOf(MessageDraft(nextId--, ""))
+                else source.orderedMessages.map { MessageDraft(it.id, it.text) },
+            )
+        }
+    }
+    var interval by remember(source?.cell?.id) { mutableIntStateOf(initialInterval) }
+    var discardConfirm by remember { mutableStateOf(false) }
+
+    val dirty = name != initialName || messages.map { it.text.trim() } != initialMessages || interval != initialInterval
+    fun requestClose() = if (dirty) { discardConfirm = true } else onDismiss()
+
+    BackHandler { requestClose() }
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+
+    // drag-reorder state
+    val draggedIndex = remember { mutableIntStateOf(-1) }
+    val dragAccum = remember { mutableFloatStateOf(0f) }
+    val stridePx = with(LocalDensity.current) { 96.dp.toPx() }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f))
+            .pointerInput(Unit) { detectTapGestures { requestClose() } },
+    ) {
+        Surface(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(0.95f)
+                .imePadding()
+                .pointerInput(Unit) { detectTapGestures { } },
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(Modifier.navigationBarsPadding().padding(20.dp)) {
+                Text(
+                    if (source == null) "Новая ячейка" else "Редактирование",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(Modifier.height(12.dp))
+                MonoField(
+                    value = name,
+                    onValueChange = { name = it },
+                    caption = "Название",
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Сообщения — перетаскивайте свайпом для изменения порядка",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    itemsIndexed(messages, key = { _, item -> item.id }) { index, item ->
+                        Row(
+                            verticalAlignment = Alignment.Bottom,
+                            modifier = Modifier
+                                .animateItemPlacement()
+                                .graphicsLayer {
+                                    alpha = if (draggedIndex.intValue == index) 0.85f else 1f
+                                }
+                                .pointerInput(item.id) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            draggedIndex.intValue = index
+                                            dragAccum.floatValue = 0f
+                                        },
+                                        onDrag = { _, dragAmount ->
+                                            val current = draggedIndex.intValue
+                                            if (current < 0) return@detectDragGesturesAfterLongPress
+                                            dragAccum.floatValue += dragAmount.y
+                                            if (dragAccum.floatValue > stridePx && current < messages.lastIndex) {
+                                                Collections.swap(messages, current, current + 1)
+                                                draggedIndex.intValue = current + 1
+                                                dragAccum.floatValue -= stridePx
+                                            } else if (dragAccum.floatValue < -stridePx && current > 0) {
+                                                Collections.swap(messages, current, current - 1)
+                                                draggedIndex.intValue = current - 1
+                                                dragAccum.floatValue += stridePx
+                                            }
+                                        },
+                                        onDragEnd = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
+                                        onDragCancel = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
+                                    )
+                                },
+                        ) {
+                            MonoField(
+                                value = item.text,
+                                onValueChange = { messages[index] = item.copy(text = it) },
+                                caption = "Сообщение ${index + 1}",
+                                modifier = Modifier.weight(1f),
+                                fieldHeight = 88.dp,
+                            )
+                            IconButton(
+                                onClick = { if (messages.size > 1) messages.removeAt(index) },
+                                enabled = messages.size > 1,
+                            ) { Icon(Icons.Default.Close, "Удалить сообщение") }
+                        }
+                    }
+                }
+                OutlinedButton(
+                    onClick = {
+                        messages.add(MessageDraft(nextId--, ""))
+                        scope.launch { listState.animateScrollToItem(messages.lastIndex) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Icon(Icons.Default.Add, null); Text(" Добавить сообщение") }
+                Spacer(Modifier.height(8.dp))
+                Text("Интервал: ${"%.1f".format(interval / 1000f)} сек.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Slider(
+                    value = interval.toFloat(),
+                    onValueChange = { interval = ((it / 100).toInt() * 100).coerceIn(300, 3_000) },
+                    valueRange = 300f..3_000f,
+                )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { requestClose() }) { Text("Отмена") }
+                    Button(onClick = {
+                        onSave(CellDraft(source?.cell?.id, name, messages.map { it.text }, source?.cell?.colorArgb ?: 0xFF6750A4, source?.cell?.icon, interval.toLong()))
+                    }) { Text("Сохранить") }
+                }
+            }
+        }
+    }
+    if (discardConfirm) {
+        AlertDialog(
+            onDismissRequest = { discardConfirm = false },
+            title = { Text("Закрыть редактор?") },
+            text = { Text("Несохранённые изменения будут потеряны.") },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("Выйти") } },
+            dismissButton = { TextButton(onClick = { discardConfirm = false }) { Text("Продолжить") } },
+        )
+    }
 }
 
 @Composable
@@ -86,7 +249,7 @@ private fun MonoField(
             singleLine = singleLine,
             minLines = if (singleLine) 1 else 3,
             maxLines = if (singleLine) 1 else 4,
-            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
             modifier = Modifier
                 .fillMaxWidth()
@@ -99,103 +262,17 @@ private fun MonoField(
                     )
                 },
             decorationBox = { inner ->
-                Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) { inner() }
-            },
-        )
-    }
-}
-
-@Composable
-internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, onSave: (CellDraft) -> Unit) {
-    val initialName = remember(source?.cell?.id) { source?.cell?.name.orEmpty().trim() }
-    val initialMessages = remember(source?.cell?.id) { source?.orderedMessages?.map { it.text } ?: listOf("") }
-    val initialInterval = remember(source?.cell?.id) { (source?.cell?.intervalMillis ?: 1_000L).toInt() }
-    var name by remember(source?.cell?.id) { mutableStateOf(initialName) }
-    val messages = remember(source?.cell?.id) {
-        mutableStateListOf<String>().apply { addAll(if (source == null) listOf("") else initialMessages) }
-    }
-    var interval by remember(source?.cell?.id) { mutableIntStateOf(initialInterval) }
-    var discardConfirm by remember { mutableStateOf(false) }
-
-    val dirty = name != initialName || messages.map(String::trim) != initialMessages || interval != initialInterval
-    fun requestClose() = if (dirty) { discardConfirm = true } else onDismiss()
-
-    BackHandler { requestClose() }
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.55f))
-            .pointerInput(Unit) { detectTapGestures { requestClose() } },
-    ) {
-        Surface(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .imePadding()
-                .pointerInput(Unit) { detectTapGestures { } },
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            color = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(Modifier.navigationBarsPadding().padding(20.dp)) {
-                Text(
-                    if (source == null) "Новая ячейка" else "Редактирование",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(Modifier.height(12.dp))
-                MonoField(
-                    value = name,
-                    onValueChange = { name = it },
-                    caption = "Название",
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                Text("Сообщения — копируются сверху вниз", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(messages.size) { index ->
-                        val text = messages[index]
-                        Row(verticalAlignment = Alignment.Bottom) {
-                            MonoField(
-                                value = text,
-                                onValueChange = { messages[index] = it },
-                                caption = "Сообщение ${index + 1}",
-                                modifier = Modifier.weight(1f),
-                                fieldHeight = 88.dp,
-                            )
-                            IconButton(onClick = { if (messages.size > 1) messages.removeAt(index) }, enabled = messages.size > 1) {
-                                Icon(Icons.Default.Close, "Удалить сообщение")
-                            }
-                        }
+                Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    if (value.isEmpty()) {
+                        Text(
+                            "Введите текст…",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                     }
+                    inner()
                 }
-                OutlinedButton(onClick = { messages.add("") }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Add, null); Text(" Добавить сообщение")
-                }
-                Spacer(Modifier.height(8.dp))
-                Text("Интервал: ${"%.1f".format(interval / 1000f)} сек.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(
-                    value = interval.toFloat(),
-                    onValueChange = { interval = ((it / 100).toInt() * 100).coerceIn(300, 3_000) },
-                    valueRange = 300f..3_000f,
-                )
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { requestClose() }) { Text("Отмена") }
-                    Button(onClick = { onSave(CellDraft(source?.cell?.id, name, messages.toList(), source?.cell?.colorArgb ?: 0xFF6750A4, source?.cell?.icon, interval.toLong())) }) { Text("Сохранить") }
-                }
-            }
-        }
-    }
-    if (discardConfirm) {
-        AlertDialog(
-            onDismissRequest = { discardConfirm = false },
-            title = { Text("Закрыть редактор?") },
-            text = { Text("Несохранённые изменения будут потеряны.") },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("Выйти") } },
-            dismissButton = { TextButton(onClick = { discardConfirm = false }) { Text("Продолжить") } },
+            },
         )
     }
 }
