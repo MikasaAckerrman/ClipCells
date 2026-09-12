@@ -2,13 +2,10 @@ package com.clipcells.app.copy
 
 import android.app.Service
 import android.content.ClipData
-import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
-import android.os.PersistableBundle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -76,15 +73,7 @@ class CopyService : Service() {
                 if (current?.revision != queue.revision) return
 
                 val item = items[index]
-                val clip = ClipData.newPlainText(queue.title, item.text)
-                clip.description.extras = PersistableBundle().apply {
-                    putBoolean(
-                        if (Build.VERSION.SDK_INT >= 33) ClipDescription.EXTRA_IS_SENSITIVE
-                        else "android.content.extra.IS_SENSITIVE",
-                        true,
-                    )
-                }
-                clipboard.setPrimaryClip(clip)
+                clipboard.setPrimaryClip(ClipData.newPlainText(queue.title, item.text))
                 if (queueDao.advance(queue.revision, index + 1) == 0) return
                 if (index < items.lastIndex) delay(queue.intervalMillis)
             }
