@@ -1,6 +1,7 @@
 package com.clipcells.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -62,6 +63,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.clipcells.app.data.CellDraft
 import com.clipcells.app.data.CellWithMessages
 import kotlinx.coroutines.launch
@@ -75,6 +77,7 @@ internal fun copiedText(n: Int): String = when {
 
 private data class MessageDraft(val id: Long, val text: String)
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, onSave: (CellDraft) -> Unit) {
     val initialName = remember(source?.cell?.id) { source?.cell?.name.orEmpty().trim() }
