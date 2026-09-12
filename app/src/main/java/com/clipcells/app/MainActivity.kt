@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     val cellsOrNull by vm.cells.collectAsStateWithLifecycle()
-    val cells = cellsOrNull ?: return
+    val cells = cellsOrNull
     val queueState by vm.queue.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("display", 0) }
@@ -99,8 +99,8 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val filteredCells = remember(cells, searchQuery) {
-        if (searchQuery.isBlank()) cells
-        else cells.filter { it.cell.name.contains(searchQuery, ignoreCase = true) }
+        if (searchQuery.isBlank()) cells ?: emptyList()
+        else cells?.filter { it.cell.name.contains(searchQuery, ignoreCase = true) } ?: emptyList()
     }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -144,7 +144,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                             ),
                         )
                     } else {
-                        Text(if (mode == HomeMode.NORMAL) "ClipCells (${cells.size})" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}")                    }
+                        Text(if (mode == HomeMode.NORMAL) "ClipCells (${cells?.size ?: 0})" else if (mode == HomeMode.EDIT) "Редактирование" else "Выбрано: ${selectedCells.size}")                    }
                 },
                 actions = {
                     if (showSearch && mode == HomeMode.NORMAL) {
@@ -153,7 +153,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                         IconButton(onClick = { showSearch = true }) { Icon(Icons.Default.Search, "Поиск") }
                         IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "Настройки") }
                         IconButton(onClick = { mode = HomeMode.EDIT }) { Icon(Icons.Default.Edit, "Редактировать") }
-                        IconButton(onClick = { mode = HomeMode.DELETE; selectedCells = emptySet() }, enabled = cells.isNotEmpty()) {
+                        IconButton(onClick = { mode = HomeMode.DELETE; selectedCells = emptySet() }, enabled = !cells.isNullOrEmpty()) {
                             Icon(Icons.Default.Delete, "Удалить")
                         }
                     } else {
@@ -177,16 +177,13 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
             }
         },
     ) { padding ->
-        if (filteredCells.isEmpty()) {
-            if (cells.isEmpty()) {
-                EmptyState(Modifier.fillMaxSize().padding(padding), onCreate = { editorCell = null; showEditor = true })
-            } else {
-                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                    Text("Ничего не найдено", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+        when {
+            cells == null -> Box(Modifier.fillMaxSize().padding(padding))
+            cells.isEmpty() -> EmptyState(Modifier.fillMaxSize().padding(padding), onCreate = { editorCell = null; showEditor = true })
+            filteredCells.isEmpty() -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Text("Ничего не найдено", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        } else {
-            BoxWithConstraints(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
+            else -> BoxWithConstraints(Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp)) {
                 val cardHeight = ((maxHeight - 12.dp * (visibleRows - 1)) / visibleRows).coerceAtLeast(64.dp)
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(columns),

@@ -106,7 +106,6 @@ interface QueueDao {
     suspend fun getItems(): List<CopyQueueItemEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putQueue(queue: CopyQueueEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putItems(items: List<CopyQueueItemEntity>)
-    @Query("DELETE FROM copy_queue_items WHERE queueId = 1") suspend fun deleteItems()
     @Query("DELETE FROM copy_queue WHERE id = 1") suspend fun deleteQueue()
     @Query("UPDATE copy_queue SET nextIndex=:nextIndex WHERE id=1 AND revision=:revision")
     suspend fun advance(revision: Long, nextIndex: Int): Int

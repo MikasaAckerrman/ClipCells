@@ -10,7 +10,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.clipcells.app.data.ClipCellsDatabase
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -81,9 +80,6 @@ class CopyService : Service() {
             }
             queueDao.finish(queue.revision)
             stopSelf()
-        } catch (_: CancellationException) {
-            throw CancellationException()
-        }
     }
 
     override fun onDestroy() {
