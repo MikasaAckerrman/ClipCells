@@ -57,6 +57,7 @@ class OverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        android.util.Log.i(TAG, "onStartCommand action=${intent?.action} showPanel=${intent?.getBooleanExtra(EXTRA_SHOW_PANEL, false)}")
         when (intent?.action) {
             ACTION_STOP -> {
                 teardown()
@@ -166,10 +167,19 @@ class OverlayService : Service() {
                 startForeground(NOTIFICATION_ID, buildNotification())
             }
             return true
-        } catch (_: Exception) {
-            // FGS restrictions changed under us — refuse to run half-alive.
-            stopSelf()
-            return false
+        } catch (typed: Exception) {
+            // Some OEM builds reject the explicitly-typed call. Fall back to
+            // the manifest-declared type before giving up; log both paths —
+            // a silent swallow here cost a debugging cycle once already.
+            android.util.Log.w(TAG, "typed startForeground(specialUse) failed", typed)
+            return try {
+                startForeground(NOTIFICATION_ID, buildNotification())
+                true
+            } catch (plain: Exception) {
+                android.util.Log.e(TAG, "startForeground failed entirely", plain)
+                stopSelf()
+                false
+            }
         }
     }
 
@@ -211,6 +221,7 @@ class OverlayService : Service() {
         const val ACTION_TEST_COPY = "com.clipcells.app.action.OVERLAY_TEST_COPY"
         const val EXTRA_SHOW_PANEL = "show_panel"
 
+        private const val TAG = "ClipCellsOverlay"
         private const val CHANNEL_ID = "overlay"
         private const val NOTIFICATION_ID = 42
 
