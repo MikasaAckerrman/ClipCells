@@ -32,6 +32,9 @@ jobs:
       - name: Unit tests (core)
         run: gradle :core:test
 
+      - name: Unit tests (app)
+        run: gradle :app:testDebugUnitTest
+
       - name: Assemble APKs
         run: gradle :app:assembleRelease :app:assembleDebug
         env:

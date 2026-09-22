@@ -1,8 +1,17 @@
 package com.clipcells.app
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -56,11 +65,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.clipcells.app.data.CellWithMessages
 import com.clipcells.app.data.CopyQueueEntity
+import com.clipcells.app.overlay.OverlayService
 import com.clipcells.app.ui.CellCard
 import com.clipcells.app.ui.CellEditorDialog
 import com.clipcells.app.ui.ClipCellsTheme
@@ -105,6 +119,46 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    // --- Floating overlay toggle (bubble + cells panel above every app) ---
+    var overlayOn by remember { mutableStateOf(OverlayService.isRunning) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) overlayOn = OverlayService.isRunning
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val overlayPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Settings.canDrawOverlays(context)) requestNotificationsAndStartOverlay()
+        else scope.launch { snackbar.showSnackbar("Разрешение «Поверх других приложений» не выдано") }
+    }
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { OverlayService.start(context) }
+    fun requestNotificationsAndStartOverlay() {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            OverlayService.start(context)
+        }
+    }
+    fun toggleOverlay() {
+        if (overlayOn) OverlayService.stop(context)
+        else if (Settings.canDrawOverlays(context)) requestNotificationsAndStartOverlay()
+        else overlayPermLauncher.launch(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}"),
+            )
+        )
+    }
 
     LaunchedEffect(queueState) {
         val previous = lastQueue
@@ -155,6 +209,13 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                     if (showSearch && mode == HomeMode.NORMAL) {
                         IconButton(onClick = { showSearch = false; searchQuery = "" }) { Icon(Icons.Default.Close, "Закрыть поиск") }
                     } else if (mode == HomeMode.NORMAL) {
+                        IconButton(onClick = { toggleOverlay() }) {
+                            Icon(
+                                painterResource(R.drawable.ic_float_window),
+                                contentDescription = "Плавающее окно",
+                                tint = if (overlayOn) Color(0xFF8AB4F8) else MaterialTheme.colorScheme.onBackground,
+                            )
+                        }
                         IconButton(onClick = { showSearch = true }) { Icon(Icons.Default.Search, "Поиск") }
                         IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, "Настройки") }
                         IconButton(onClick = { mode = HomeMode.EDIT }) { Icon(Icons.Default.Edit, "Редактировать") }
