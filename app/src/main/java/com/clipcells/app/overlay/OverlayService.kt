@@ -81,6 +81,7 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
+        android.util.Log.i(TAG, "service onDestroy")
         teardown()
         scope.cancel()
         super.onDestroy()
@@ -243,6 +244,16 @@ class OverlayService : Service() {
             } catch (_: Exception) {
                 // Background start refused — the toggle UI is foreground,
                 // so this only happens in exotic races; the flag stays false.
+            }
+        }
+
+        /** Delivers ACTION_TEST_COPY — must come from the app (shell starts are denied). */
+        fun testCopy(context: Context) {
+            try {
+                context.startService(
+                    Intent(context, OverlayService::class.java).setAction(ACTION_TEST_COPY)
+                )
+            } catch (_: Exception) {
             }
         }
 

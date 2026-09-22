@@ -87,6 +87,11 @@ import com.clipcells.app.ui.copiedText
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private companion object {
+        const val EXTRA_TEST_COPY = "test_copy"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         maybeStartOverlayFromIntent(intent)
@@ -107,6 +112,7 @@ class MainActivity : ComponentActivity() {
             this,
             showPanel = intent.getBooleanExtra(OverlayService.EXTRA_SHOW_PANEL, true),
         )
+        if (intent.getBooleanExtra(EXTRA_TEST_COPY, false)) OverlayService.testCopy(this)
     }
 }
 

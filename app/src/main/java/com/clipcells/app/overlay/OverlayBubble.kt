@@ -64,13 +64,15 @@ class OverlayBubble(
             wm.addView(bubble, params)
             view = bubble
             visible = true
-        } catch (_: Exception) {
-            // Window churn (permission revoked mid-flight) — stay hidden.
+            android.util.Log.i(TAG, "bubble shown")
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "bubble addView failed", e)
         }
     }
 
     fun hide() {
         val v = view ?: return
+        android.util.Log.i(TAG, "bubble hide")
         try {
             wm.removeView(v)
         } catch (_: Exception) {
@@ -226,6 +228,7 @@ class OverlayBubble(
 
         /** px — 56dp is recomputed via dp at build time. */
         private const val LONG_PRESS_MILLIS = 480L
+        private const val TAG = "ClipCellsOverlay"
     }
 
     private val SIDE = 56 * dp

@@ -219,12 +219,15 @@ internal class OverlayPanelController(
         if (root.isAttachedToWindow) return
         try {
             wm.addView(root, layoutParams())
-        } catch (_: Exception) {
+            android.util.Log.i(TAG, "panel shown")
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "panel addView failed", e)
         }
     }
 
     fun hide() {
         if (!root.isAttachedToWindow) return
+        android.util.Log.i(TAG, "panel hide")
         try {
             wm.removeView(root)
         } catch (_: Exception) {
@@ -622,5 +625,6 @@ internal class OverlayPanelController(
         private const val OK_GREEN = "#FF7BD88F"
 
         private const val FEEDBACK_MILLIS = 2_500L
+        private const val TAG = "ClipCellsOverlay"
     }
 }
