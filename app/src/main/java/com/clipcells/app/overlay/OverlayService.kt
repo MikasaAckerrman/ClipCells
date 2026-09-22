@@ -22,22 +22,20 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Hosts the ClipCells floating overlay: the tool bubble plus the cells panel.
+ * Hosts the ClipCells floating overlay: a single compact cells panel.
  *
  * Foreground service (specialUse, per the PRD constraint) started ONLY by an
  * explicit user action from the main activity — the process must outlive the
  * activity so the windows stay above every app.
  *
- * Power discipline: while the panel is closed NOTHING observes the database
- * (the Room subscription exists only between panel show and panel hide), the
- * bubble is a single static view, and the notification is LOW priority. The
- * service never polls, never wakes, has no network permission.
+ * Power discipline: the Room subscription exists only while the panel is
+ * attached; the service never polls, never wakes, has no network permission.
  *
  * Intent hooks (also used by the future donut launcher and by process-level
- * tests — no screen taps needed):
- *  - ACTION_START (+EXTRA_SHOW_PANEL) — ensure bubble, optionally open panel
- *  - ACTION_STOP — remove everything and stop
- *  - ACTION_DISMISS_PANEL — close just the panel (bubble stays)
+ * tests — no screen taps needed; shell-delivered intents are DENIED on
+ * Android 15, so external launchers go through the MainActivity extras):
+ *  - ACTION_START — show the panel
+ *  - ACTION_STOP — remove the panel and stop
  *  - ACTION_TEST_COPY — write a test string through the focus-aware copier
  */
 class OverlayService : Service() {
@@ -46,7 +44,6 @@ class OverlayService : Service() {
     private val cursor = CellCursor()
     private val repository by lazy { CellRepository(ClipCellsDatabase.get(this)) }
 
-    private var bubble: OverlayBubble? = null
     private var panel: OverlayPanelController? = null
     private var cellsJob: Job? = null
 
@@ -64,7 +61,6 @@ class OverlayService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_DISMISS_PANEL -> panel?.hide()
             ACTION_TEST_COPY -> {
                 showPanel()
                 panel?.copier?.copy(
@@ -73,8 +69,9 @@ class OverlayService : Service() {
             }
             else -> {
                 if (!startForegroundCompat()) return START_NOT_STICKY
-                ensureBubble()
-                if (intent?.getBooleanExtra(EXTRA_SHOW_PANEL, false) == true) showPanel()
+                // The panel IS the overlay — no launcher bubble by product
+                // decision: the window opens directly, closes only via ✕.
+                showPanel()
             }
         }
         return START_NOT_STICKY
@@ -91,18 +88,6 @@ class OverlayService : Service() {
 
     // ------------------------------------------------------------- windows
 
-    private fun ensureBubble() {
-        if (bubble == null) {
-            bubble = OverlayBubble(
-                context = this,
-                wm = getSystemService(android.view.WindowManager::class.java),
-                onTap = { showPanel() },
-                onLongPress = { stopOverlay() },
-            )
-        }
-        bubble?.show()
-    }
-
     private fun showPanel() {
         var existing = panel
         if (existing == null) {
@@ -110,7 +95,8 @@ class OverlayService : Service() {
                 context = this,
                 wm = getSystemService(android.view.WindowManager::class.java),
                 cursor = cursor,
-                onClose = { panel?.hide() },
+                // ✕ is the only close: it ends the whole overlay session.
+                onClose = { stopOverlay() },
                 cancelCopyQueue = ::cancelCopyQueue,
             ).also { controller ->
                 controller.create()
@@ -152,8 +138,6 @@ class OverlayService : Service() {
         panel?.hide()
         panel?.copier?.dispose()
         panel = null
-        bubble?.hide()
-        bubble = null
         isRunning = false
     }
 
@@ -218,7 +202,6 @@ class OverlayService : Service() {
     companion object {
         const val ACTION_START = "com.clipcells.app.action.OVERLAY_START"
         const val ACTION_STOP = "com.clipcells.app.action.OVERLAY_STOP"
-        const val ACTION_DISMISS_PANEL = "com.clipcells.app.action.OVERLAY_DISMISS_PANEL"
         const val ACTION_TEST_COPY = "com.clipcells.app.action.OVERLAY_TEST_COPY"
         const val EXTRA_SHOW_PANEL = "show_panel"
 

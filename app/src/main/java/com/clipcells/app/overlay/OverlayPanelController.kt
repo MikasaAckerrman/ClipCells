@@ -89,10 +89,10 @@ internal class OverlayPanelController(
     fun create() {
         root = OverlayPanelRoot(context).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            setPadding(16 * dp, 14 * dp, 16 * dp, 16 * dp)
+            setPadding(12 * dp, 10 * dp, 12 * dp, 12 * dp)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(PANEL_BG))
-                cornerRadius = 26 * dp.toFloat()
+                cornerRadius = 22 * dp.toFloat()
                 setStroke(dp, Color.parseColor(STROKE))
             }
         }
@@ -132,7 +132,7 @@ internal class OverlayPanelController(
 
         titleView = TextView(context).apply {
             text = "Ячейки"
-            textSize = 15f
+            textSize = 14f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(Color.parseColor(TEXT))
             maxLines = 1
@@ -143,7 +143,7 @@ internal class OverlayPanelController(
         header.addView(titleView)
 
         counterView = TextView(context).apply {
-            textSize = 12f
+            textSize = 11f
             setTextColor(Color.parseColor(TEXT_DIM))
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
@@ -157,7 +157,7 @@ internal class OverlayPanelController(
 
     private fun buildFeedback(): View {
         feedbackView = TextView(context).apply {
-            textSize = 11f
+            textSize = 10f
             setTextColor(Color.parseColor(TEXT_FAINT))
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -172,8 +172,8 @@ internal class OverlayPanelController(
         grid = GridView(context).apply {
             numColumns = 3
             stretchMode = GridView.STRETCH_COLUMN_WIDTH
-            verticalSpacing = 10 * dp
-            horizontalSpacing = 10 * dp
+            verticalSpacing = 8 * dp
+            horizontalSpacing = 8 * dp
             adapter = cellsAdapter
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, gridHeight()
@@ -198,7 +198,8 @@ internal class OverlayPanelController(
     // ------------------------------------------------------------- window
 
     fun layoutParams(): WindowManager.LayoutParams {
-        val width = minOf((screen.x * 0.88f).toInt(), 420 * dp)
+        // Compact by product decision: a small card, not a sheet.
+        val width = minOf(240 * dp, (screen.x * 0.60f).toInt())
         return WindowManager.LayoutParams(
             width,
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -373,14 +374,14 @@ internal class OverlayPanelController(
                 android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
                 GradientDrawable().apply {
                     setColor(Color.parseColor(CELL_BG))
-                    cornerRadius = 18 * dp.toFloat()
+                    cornerRadius = 14 * dp.toFloat()
                     setStroke(dp, Color.parseColor(CELL_STROKE))
                 },
                 null,
             )
 
             nameView = TextView(context).apply {
-                textSize = 13f
+                textSize = 11f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(Color.parseColor(TEXT))
                 gravity = Gravity.CENTER
@@ -396,22 +397,22 @@ internal class OverlayPanelController(
             })
 
             countView = TextView(context).apply {
-                textSize = 10f
+                textSize = 9f
                 setTextColor(Color.parseColor(TEXT_DIM))
                 gravity = Gravity.CENTER
             }
             addView(countView, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; bottomMargin = 6 * dp })
+            ).apply { gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; bottomMargin = 3 * dp })
 
             badgeView = TextView(context).apply {
-                textSize = 10f
+                textSize = 8f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(Color.parseColor(ACCENT))
             }
             addView(badgeView, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = Gravity.TOP or Gravity.END; topMargin = 6 * dp; marginEnd = 8 * dp })
+            ).apply { gravity = Gravity.TOP or Gravity.END; topMargin = 4 * dp; marginEnd = 6 * dp })
         }
 
         fun bind(cell: CellWithMessages, peekIndex: Int) {
@@ -458,13 +459,13 @@ internal class OverlayPanelController(
         init {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(12 * dp, 10 * dp, 12 * dp, 10 * dp)
+            setPadding(10 * dp, 7 * dp, 10 * dp, 7 * dp)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor(CELL_BG))
-                cornerRadius = 12 * dp.toFloat()
+                cornerRadius = 10 * dp.toFloat()
             }
             indexView = TextView(context).apply {
-                textSize = 11f
+                textSize = 10f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(Color.parseColor(ACCENT))
             }
@@ -473,7 +474,7 @@ internal class OverlayPanelController(
             ).apply { marginEnd = 8 * dp })
 
             textView = TextView(context).apply {
-                textSize = 12f
+                textSize = 11f
                 setTextColor(Color.parseColor(TEXT_SOFT))
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
@@ -577,7 +578,7 @@ internal class OverlayPanelController(
     private fun iconButton(glyph: String, description: String, onClick: () -> Unit): TextView =
         TextView(context).apply {
             text = glyph
-            textSize = 18f
+            textSize = 15f
             gravity = Gravity.CENTER
             contentDescription = description
             setTextColor(Color.parseColor(TEXT_DIM))
@@ -586,15 +587,15 @@ internal class OverlayPanelController(
                 android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
                 GradientDrawable().apply {
                     setColor(Color.parseColor("#00FFFFFF"))
-                    cornerRadius = 20 * dp.toFloat()
+                    cornerRadius = 16 * dp.toFloat()
                 },
                 null,
             )
-            layoutParams = LinearLayout.LayoutParams(40 * dp, 40 * dp)
+            layoutParams = LinearLayout.LayoutParams(32 * dp, 32 * dp)
         }
 
-    private fun gridHeight(): Int = (screen.y * 0.50f).toInt()
-    private fun cellHeight(): Int = (screen.y * 0.105f).toInt().coerceAtLeast(64 * dp)
+    private fun gridHeight(): Int = 186 * dp
+    private fun cellHeight(): Int = 52 * dp
 
     private fun screenPx(): Point {
         if (Build.VERSION.SDK_INT >= 30) {
