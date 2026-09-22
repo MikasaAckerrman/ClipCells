@@ -131,15 +131,10 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val overlayPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) {
-        if (Settings.canDrawOverlays(context)) requestNotificationsAndStartOverlay()
-        else scope.launch { snackbar.showSnackbar("Разрешение «Поверх других приложений» не выдано") }
-    }
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { OverlayService.start(context) }
+
     fun requestNotificationsAndStartOverlay() {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
                 context, Manifest.permission.POST_NOTIFICATIONS
@@ -149,6 +144,13 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
         } else {
             OverlayService.start(context)
         }
+    }
+
+    val overlayPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Settings.canDrawOverlays(context)) requestNotificationsAndStartOverlay()
+        else scope.launch { snackbar.showSnackbar("Разрешение «Поверх других приложений» не выдано") }
     }
     fun toggleOverlay() {
         if (overlayOn) OverlayService.stop(context)
