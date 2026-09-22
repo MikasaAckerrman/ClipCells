@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ClipCells</string>
+    <string name="overlay_permission_missing">Нет разрешения «Поверх других приложений» — включи его в настройках ClipCells</string>
 </resources>

@@ -8,4 +8,18 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
+
+    <!-- Invisible launcher for the floating window: shows NOTHING on screen
+         (fully translucent, zero animations), starts the overlay service
+         while the app legally counts as foreground, and finishes in the
+         same frame — the user never leaves their current app. -->
+    <style name="Theme.ClipCells.Trampoline" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

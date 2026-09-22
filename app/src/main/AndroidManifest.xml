@@ -33,6 +33,17 @@
             android:name=".copy.CopyService"
             android:exported="false" />
 
+        <!-- Invisible launcher for the floating window: starts the overlay
+             service and finishes in the same frame. The user's current app
+             never leaves the screen. -->
+        <activity
+            android:name=".OverlayTrampolineActivity"
+            android:theme="@style/Theme.ClipCells.Trampoline"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:exported="true" />
+
         <service
             android:name=".overlay.OverlayService"
             android:exported="false"
