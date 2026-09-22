@@ -18,12 +18,21 @@ import com.clipcells.app.overlay.OverlayService
  */
 class OverlayTrampolineActivity : Activity() {
 
+    private companion object {
+        const val EXTRA_TEST_COPY = "test_copy"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         if (Settings.canDrawOverlays(this)) {
             OverlayService.start(this, showPanel = intent.getBooleanExtra(
                 OverlayService.EXTRA_SHOW_PANEL, true))
+            // Dev/CI hook: prove the focus-aware clipboard path end-to-end
+            // without touching the screen.
+            if (intent.getBooleanExtra(EXTRA_TEST_COPY, false)) {
+                OverlayService.testCopy(this)
+            }
         } else {
             Toast.makeText(this, R.string.overlay_permission_missing, Toast.LENGTH_SHORT).show()
         }
