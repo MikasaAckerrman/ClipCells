@@ -89,7 +89,24 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        maybeStartOverlayFromIntent(intent)
         setContent { ClipCellsTheme { ClipCellsApp() } }
+    }
+
+    /**
+     * Legal overlay entry point: Android 15 denies foreground-service starts
+     * from outside the app (getFgsAllowStart=DENIED for cross-app/shell
+     * callers), so the service must be started by the app itself while its
+     * activity is visible. External launchers (the donut app, automation)
+     * open this activity with EXTRA_START_OVERLAY instead.
+     */
+    private fun maybeStartOverlayFromIntent(intent: Intent?) {
+        if (intent == null || !intent.getBooleanExtra(OverlayService.EXTRA_START_OVERLAY, false)) return
+        if (!Settings.canDrawOverlays(this)) return
+        OverlayService.start(
+            this,
+            showPanel = intent.getBooleanExtra(OverlayService.EXTRA_SHOW_PANEL, true),
+        )
     }
 }
 

@@ -221,6 +221,9 @@ class OverlayService : Service() {
         const val ACTION_TEST_COPY = "com.clipcells.app.action.OVERLAY_TEST_COPY"
         const val EXTRA_SHOW_PANEL = "show_panel"
 
+        /** Launch extra on MainActivity: start the overlay legally from the app. */
+        const val EXTRA_START_OVERLAY = "start_overlay"
+
         private const val TAG = "ClipCellsOverlay"
         private const val CHANNEL_ID = "overlay"
         private const val NOTIFICATION_ID = 42
