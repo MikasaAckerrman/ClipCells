@@ -85,6 +85,11 @@ interface CellDao {
     @Query("SELECT * FROM cells ORDER BY position")
     fun observeAll(): Flow<List<CellWithMessages>>
 
+    /** One-shot snapshot for the overlay (no Flow subscription: zero idle cost). */
+    @Transaction
+    @Query("SELECT * FROM cells ORDER BY position")
+    fun getAllSync(): List<CellWithMessages>
+
     @Transaction
     @Query("SELECT * FROM cells WHERE id = :id")
     suspend fun get(id: Long): CellWithMessages?

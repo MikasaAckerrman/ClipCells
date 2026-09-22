@@ -2,14 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Floating overlay: bubble + cells panel above every app.
-         SYSTEM_ALERT_WINDOW is a special-access appop (Settings or adb/root);
-         the FGS is started only by an explicit user action from the main
-         screen and is declared specialUse per the PRD constraint. -->
+    <!-- Floating overlay panel above every app. Copy-as-File architecture:
+         NO service at all — the visible overlay window itself keeps the
+         process alive and exempt from the freezer, so idle cost is zero.
+         SYSTEM_ALERT_WINDOW is a special-access appop. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="false"
@@ -44,13 +41,5 @@
             android:noHistory="true"
             android:exported="true" />
 
-        <service
-            android:name=".overlay.OverlayService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Floating panel with saved texts for quick clipboard copying" />
-        </service>
     </application>
 </manifest>

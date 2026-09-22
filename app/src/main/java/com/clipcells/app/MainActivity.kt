@@ -1,17 +1,13 @@
 package com.clipcells.app
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -75,7 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.clipcells.app.data.CellWithMessages
 import com.clipcells.app.data.CopyQueueEntity
-import com.clipcells.app.overlay.OverlayService
+import com.clipcells.app.overlay.OverlayPanel
 import com.clipcells.app.ui.CellCard
 import com.clipcells.app.ui.CellEditorDialog
 import com.clipcells.app.ui.ClipCellsTheme
@@ -89,6 +85,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private companion object {
+        const val EXTRA_START_OVERLAY = "start_overlay"
         const val EXTRA_TEST_COPY = "test_copy"
     }
 
@@ -99,20 +96,14 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Legal overlay entry point: Android 15 denies foreground-service starts
-     * from outside the app (getFgsAllowStart=DENIED for cross-app/shell
-     * callers), so the service must be started by the app itself while its
-     * activity is visible. External launchers (the donut app, automation)
-     * open this activity with EXTRA_START_OVERLAY instead.
+     * External launchers (the donut app, automation) open this activity with
+     * EXTRA_START_OVERLAY; the overlay needs no service — the window itself
+     * keeps the process alive (Copy-as-File architecture).
      */
     private fun maybeStartOverlayFromIntent(intent: Intent?) {
-        if (intent == null || !intent.getBooleanExtra(OverlayService.EXTRA_START_OVERLAY, false)) return
+        if (intent == null || !intent.getBooleanExtra(EXTRA_START_OVERLAY, false)) return
         if (!Settings.canDrawOverlays(this)) return
-        OverlayService.start(
-            this,
-            showPanel = intent.getBooleanExtra(OverlayService.EXTRA_SHOW_PANEL, true),
-        )
-        if (intent.getBooleanExtra(EXTRA_TEST_COPY, false)) OverlayService.testCopy(this)
+        OverlayPanel.launch(this, testCopy = intent.getBooleanExtra(EXTRA_TEST_COPY, false))
     }
 }
 
@@ -144,40 +135,25 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // --- Floating overlay toggle (bubble + cells panel above every app) ---
-    var overlayOn by remember { mutableStateOf(OverlayService.isRunning) }
+    // --- Floating overlay toggle (the window above every app) ---
+    var overlayOn by remember { mutableStateOf(OverlayPanel.isShowing()) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) overlayOn = OverlayService.isRunning
+            if (event == Lifecycle.Event.ON_RESUME) overlayOn = OverlayPanel.isShowing()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val notifPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { OverlayService.start(context) }
-
-    fun requestNotificationsAndStartOverlay() {
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
-                context, Manifest.permission.POST_NOTIFICATIONS
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            OverlayService.start(context)
-        }
-    }
-
     val overlayPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        if (Settings.canDrawOverlays(context)) requestNotificationsAndStartOverlay()
+        if (Settings.canDrawOverlays(context)) OverlayPanel.launch(context)
         else scope.launch { snackbar.showSnackbar("Разрешение «Поверх других приложений» не выдано") }
     }
     fun toggleOverlay() {
-        if (overlayOn) OverlayService.stop(context)
-        else if (Settings.canDrawOverlays(context)) requestNotificationsAndStartOverlay()
+        if (overlayOn) OverlayPanel.hide()
+        else if (Settings.canDrawOverlays(context)) OverlayPanel.launch(context)
         else overlayPermLauncher.launch(
             Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
