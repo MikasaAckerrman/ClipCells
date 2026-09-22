@@ -148,6 +148,7 @@ class OverlayService : Service() {
         cellsJob?.cancel()
         cellsJob = null
         panel?.hide()
+        panel?.copier?.dispose()
         panel = null
         bubble?.hide()
         bubble = null

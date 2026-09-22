@@ -490,8 +490,9 @@ internal class OverlayPanelController(
         }
 
         override fun getCount() = cell?.orderedMessages?.size ?: 0
-        override fun getItem(position: Int): Any = cell!!.orderedMessages[position]
-        override fun getItemId(position: Int): Long = cell!!.orderedMessages[position].id
+        override fun getItem(position: Int): Any = cell?.orderedMessages?.getOrNull(position) ?: Unit
+        override fun getItemId(position: Int): Long =
+            cell?.orderedMessages?.getOrNull(position)?.id ?: 0L
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val current = cell ?: return View(parent.context)

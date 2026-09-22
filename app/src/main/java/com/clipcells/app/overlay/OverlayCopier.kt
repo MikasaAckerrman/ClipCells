@@ -41,8 +41,31 @@ class OverlayCopier(
         if (hasFocus) flushPending()
     }
 
+    /**
+     * Window-focus listeners registered on a view that is not yet attached
+     * to a window live on a floating observer and MAY not survive the
+     * attach merge — so we (re)register at attach time, which is also the
+     * moment the view gains its real ViewTreeObserver. Idempotent with the
+     * direct registration for the already-attached case.
+     */
+    private val attachListener = object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(v: View) {
+            v.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
+        }
+
+        override fun onViewDetachedFromWindow(v: View) {
+            try {
+                v.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     init {
-        focusView.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
+        if (focusView.isAttachedToWindow) {
+            focusView.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
+        }
+        focusView.addOnAttachStateChangeListener(attachListener)
     }
 
     /**
@@ -85,6 +108,7 @@ class OverlayCopier(
 
     fun dispose() {
         try {
+            focusView.removeOnAttachStateChangeListener(attachListener)
             focusView.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
         } catch (_: Exception) {
             // Observer already dead with the detached view — nothing to clean.
