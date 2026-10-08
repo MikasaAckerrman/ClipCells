@@ -91,7 +91,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val written = clipboard().primaryClip
                     ?.getItemAt(0)?.coerceToText(getApplication())?.toString()
                 if (written != text) {
-                    throw TooLargeClipException(text.length)
+                    android.util.Log.i(TAG, "copySelected cell=$cellId VERIFY_FAILED chars=${text.length}")
+                    throw TooLargeClipException(text.length, text)
                 }
                 android.util.Log.i(TAG, "copySelected cell=$cellId messages=$count chars=${text.length} verified")
                 count
