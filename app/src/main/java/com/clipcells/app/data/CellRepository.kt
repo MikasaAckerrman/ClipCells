@@ -71,12 +71,6 @@ class CellRepository(private val db: ClipCellsDatabase) {
 
     suspend fun queueSelection(cellId: Long, selectedIds: List<Long>): Int = queue(cellId, selectedIds)
 
-    suspend fun unfinishedQueueSize(): Int? = db.withTransaction {
-        val q = queues.getQueue() ?: return@withTransaction null
-        val items = queues.getItems()
-        if (items.isNotEmpty() && q.nextIndex < items.size) items.size else null
-    }
-
     fun observeQueue(): Flow<CopyQueueEntity?> = queues.observeQueue()
 
     private suspend fun queue(cellId: Long, selectedIds: List<Long>?): Int {
@@ -101,6 +95,7 @@ class CellRepository(private val db: ClipCellsDatabase) {
                     title = plan.cellName,
                     cellId = plan.cellId,
                     intervalMillis = plan.intervalMillis,
+                    totalCount = plan.items.size,
                     nextIndex = 0,
                     revision = revision,
                 ),

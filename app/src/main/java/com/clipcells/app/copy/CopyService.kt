@@ -7,105 +7,70 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.os.SystemClock
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.ProcessLifecycleOwner
 import com.clipcells.app.data.ClipCellsDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Пишет элементы очереди в системный буфер с интервалом.
- * Android 10+ игнорирует setPrimaryClip у приложения без фокуса (проверено на устройстве),
- * поэтому при уходе приложения в фон очередь останавливается и продолжается при возврате —
- * прогресс хранится в БД (nextIndex), повторы записей исключены.
+ * Копирует РОВНО ОДНО сообщение очереди за вызов (v0.12.2: интервалы убраны
+ * полностью по требованию — авто-темпа не существует, очередь двигают только тапы
+ * пользователя). Каждый тап по активной ячейке — ACTION_ADVANCE: следующее сообщение
+ * в буфере за ~16 мс (замер телеметрией), прогресс nextIndex лежит в БД и переживает
+ * всё. Очередь на пустое → finish; тап по завершённой/другой ячейке → новая очередь.
  *
- * Скорость (v0.12.1): интервал по умолчанию 250 мс, безопасный пол 50 мс — сама запись
- * в буфер это binder-вызов (~1-3 мс), ОС не троттлит; интервал существует только чтобы
- * человек успевал вставить сообщение до появления следующего. Тап по той же ячейке
- * (ACTION_ADVANCE) копирует СЛЕДУЮЩЕЕ сообщение мгновенно и без создания новой очереди —
- * темп задаёт пользователь, а не таймер.
+ * Android 10+ игнорирует setPrimaryClip у приложения без фокуса (проверено на
+ * устройстве) — сервис вызывается только из открытого приложения, буфер пишется
+ * легально. Сервис живёт миллисекунды (одно сообщение) и уходит: ноль простоя.
  */
 class CopyService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var activeJob: Job? = null
     private val queueDao by lazy { ClipCellsDatabase.get(this).queueDao() }
     private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
-
-    private val appObserver = LifecycleEventObserver { _, event ->
-        if (event == Lifecycle.Event.ON_STOP) {
-            val job = activeJob
-            if (job?.isActive == true) {
-                job.cancel()
-                stopSelf()
-            }
-        }
-    }
-
-    override fun onCreate() {
-        super.onCreate()
-        ProcessLifecycleOwner.get().lifecycle.addObserver(appObserver)
-    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CANCEL -> {
-                activeJob?.cancel()
                 scope.launch {
                     queueDao.deleteQueue()
                     stopSelf()
                 }
                 return START_NOT_STICKY
             }
-            // Same cell tapped again: the current progress (nextIndex) is
-            // already persisted, so a plain queue re-run copies the NEXT
-            // message instantly (no initial delay, no new queue, no restart
-            // from the first message). The human sets the pace, not the timer.
-            ACTION_ADVANCE -> {
-                activeJob?.cancel()
-                activeJob = scope.launch { runQueue() }
-                return START_NOT_STICKY
-            }
         }
 
-        activeJob?.cancel()
-        activeJob = scope.launch { runQueue() }
+        // START и ADVANCE делают одно и то же: следующее (или первое) сообщение
+        // — единица работы, никакого цикла, никакого таймера.
+        scope.launch { copyNext() }
         return START_NOT_STICKY
     }
 
-    private suspend fun runQueue() {
+    private suspend fun copyNext() {
         val queue = queueDao.getQueue() ?: return stopSelf()
         val items = queueDao.getItems()
-        if (items.isEmpty() || queue.nextIndex !in 0..items.size) {
+        if (items.isEmpty() || queue.nextIndex !in 0 until items.size) {
             queueDao.finish(queue.revision)
             return stopSelf()
         }
 
         val startedAt = SystemClock.elapsedRealtime()
-        for (index in queue.nextIndex until items.size) {
-            val item = items[index]
-            clipboard.setPrimaryClip(ClipData.newPlainText(queue.title, item.text))
-            // Revision-guarded progress write: returns 0 when the queue was
-            // replaced/cancelled meanwhile — the only freshness check needed
-            // (the per-item re-read of the queue row was redundant DB I/O).
-            if (queueDao.advance(queue.revision, index + 1) == 0) return
-            android.util.Log.i(
-                TAG, "queue item ${index + 1}/${items.size} " +
-                    "t=+${SystemClock.elapsedRealtime() - startedAt}ms"
-            )
-            if (index < items.lastIndex) delay(queue.intervalMillis)
+        val index = queue.nextIndex
+        val item = items[index]
+        clipboard.setPrimaryClip(ClipData.newPlainText(queue.title, item.text))
+        // Ревизионный гвард: очередь заменили/отменили — тихо уходим.
+        if (queueDao.advance(queue.revision, index + 1) == 0) return stopSelf()
+        android.util.Log.i(
+            TAG, "copied ${index + 1}/${items.size} in ${SystemClock.elapsedRealtime() - startedAt}ms"
+        )
+        if (index + 1 >= items.size) {
+            queueDao.finish(queue.revision)
         }
-        queueDao.finish(queue.revision)
         stopSelf()
     }
 
     override fun onDestroy() {
-        ProcessLifecycleOwner.get().lifecycle.removeObserver(appObserver)
         scope.cancel()
         super.onDestroy()
     }

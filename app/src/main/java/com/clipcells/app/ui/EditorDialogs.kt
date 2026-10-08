@@ -91,7 +91,7 @@ private data class MessageDraft(val id: Long, val text: String)
 internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, onSave: (CellDraft) -> Unit) {
     val initialName = remember(source?.cell?.id) { source?.cell?.name.orEmpty().trim() }
     val initialMessages = remember(source?.cell?.id) { source?.orderedMessages?.map { it.text } ?: listOf("") }
-    val initialInterval = remember(source?.cell?.id) { (source?.cell?.intervalMillis ?: 1_000L).toInt() }
+
     var nextId by remember { mutableLongStateOf(-1L) }
     var name by remember(source?.cell?.id) { mutableStateOf(initialName) }
     val messages = remember(source?.cell?.id) {
@@ -102,13 +102,12 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
             )
         }
     }
-    var interval by remember(source?.cell?.id) { mutableIntStateOf(initialInterval) }
     var discardConfirm by remember { mutableStateOf(false) }
     var lastAddedId by remember { mutableLongStateOf(Long.MIN_VALUE) }
     var lastDeletedMessage by remember { mutableStateOf<Pair<Int, MessageDraft>?>(null) }
     val editorSnackbar = remember { SnackbarHostState() }
 
-    val dirty = name != initialName || messages.map { it.text.trim() } != initialMessages || interval != initialInterval
+    val dirty = name != initialName || messages.map { it.text.trim() } != initialMessages
     fun requestClose() = if (dirty) { discardConfirm = true } else onDismiss()
 
     BackHandler { requestClose() }
@@ -249,16 +248,10 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                     modifier = Modifier.fillMaxWidth(),
                 ) { Icon(Icons.Default.Add, null); Text(" Добавить сообщение") }
                 Spacer(Modifier.height(8.dp))
-                Text("Интервал: ${"%.1f".format(interval / 1000f)} сек.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(
-                    value = interval.toFloat(),
-                    onValueChange = { interval = ((it / 100).toInt() * 100).coerceIn(300, 3_000) },
-                    valueRange = 300f..3_000f,
-                )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { requestClose() }) { Text("Отмена") }
                     Button(onClick = {
-                        onSave(CellDraft(source?.cell?.id, name, messages.map { it.text }, source?.cell?.colorArgb ?: 0xFF6750A4, source?.cell?.icon, interval.toLong()))
+                        onSave(CellDraft(source?.cell?.id, name, messages.map { it.text }, source?.cell?.colorArgb ?: 0xFF6750A4, source?.cell?.icon, null))
                     }) { Text("Сохранить") }
                 }
                 SnackbarHost(editorSnackbar)

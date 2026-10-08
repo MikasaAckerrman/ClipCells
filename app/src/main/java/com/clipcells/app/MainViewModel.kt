@@ -32,12 +32,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     init {
-        viewModelScope.launch {
-            val unfinished = repository.unfinishedQueueSize() ?: return@launch
-            pendingCount = unfinished
-            runCatching { application.startService(CopyService.startIntent(application)) }
-                .onFailure { pendingCount = null }
-        }
+        // v0.12.2: no auto-resume — the queue advances ONLY on user taps.
+        // A half-done queue row from a killed process simply shows its
+        // progress badge and continues on the next tap of that cell.
     }
 
     fun consumePendingCount(): Int? = pendingCount.also { pendingCount = null }

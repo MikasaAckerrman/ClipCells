@@ -59,6 +59,8 @@ data class CopyQueueEntity(
     /** Owning cell — lets a tap on the SAME cell advance the queue instead of restarting it. */
     val cellId: Long = -1L,
     val intervalMillis: Long,
+    /** Total items when the queue was created — for the →n/N progress badge. */
+    val totalCount: Int = 0,
     val nextIndex: Int,
     val revision: Long,
 )
@@ -121,7 +123,7 @@ interface QueueDao {
 
 @Database(
     entities = [CellEntity::class, MessageEntity::class, CopyQueueEntity::class, CopyQueueItemEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class ClipCellsDatabase : RoomDatabase() {
@@ -138,12 +140,19 @@ abstract class ClipCellsDatabase : RoomDatabase() {
             }
         }
 
+        /** v2→v3: copy_queue gains totalCount for the progress badge (v0.12.2). */
+        private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE copy_queue ADD COLUMN totalCount INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun get(context: Context): ClipCellsDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ClipCellsDatabase::class.java,
                 "clipcells.db",
-            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
         }
     }
 }

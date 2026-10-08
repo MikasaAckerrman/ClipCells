@@ -260,11 +260,17 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(filteredCells, key = { it.cell.id }, contentType = { "cell" }) { cell ->
+                        // Tap-driven queue progress badge (v0.12.2): the active
+                        // cell shows which message the NEXT tap will copy.
+                        val progressBadge = queueState?.takeIf {
+                            it.cellId == cell.cell.id && it.totalCount > 0 && it.nextIndex < it.totalCount
+                        }?.let { "→${it.nextIndex + 1}/${it.totalCount}" }
                         CellCard(
                             cell = cell,
                             height = cardHeight,
                             mode = mode,
                             selected = cell.cell.id in selectedCells,
+                            queueProgress = progressBadge,
                             onTap = {
                                 when (mode) {
                                     HomeMode.NORMAL -> vm.copyWhole(cell.cell.id) { error = it.message }
