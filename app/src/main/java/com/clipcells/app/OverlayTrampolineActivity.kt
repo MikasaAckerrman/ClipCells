@@ -23,7 +23,13 @@ class OverlayTrampolineActivity : Activity() {
         super.onCreate(savedInstanceState)
 
         if (Settings.canDrawOverlays(this)) {
-            OverlayPanel.launch(this, testCopy = intent.getBooleanExtra(EXTRA_TEST_COPY, false))
+            if (intent.getBooleanExtra(EXTRA_PASTE_MODE, false)) {
+                // Режим из шторки (плитка «Вставка»): статичная панель
+                // быстрой вставки в сфокусированное поле, без клавиатуры.
+                com.clipcells.app.overlay.OverlayPastePanel.launch(this)
+            } else {
+                OverlayPanel.launch(this, testCopy = intent.getBooleanExtra(EXTRA_TEST_COPY, false))
+            }
         } else {
             Toast.makeText(this, R.string.overlay_permission_missing, Toast.LENGTH_SHORT).show()
         }
@@ -35,5 +41,6 @@ class OverlayTrampolineActivity : Activity() {
 
     private companion object {
         const val EXTRA_TEST_COPY = "test_copy"
+        const val EXTRA_PASTE_MODE = "paste_mode"
     }
 }

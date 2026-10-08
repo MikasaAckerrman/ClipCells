@@ -3,6 +3,7 @@ package com.clipcells.app.overlay
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
+import android.graphics.Rect
 import android.os.Bundle
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
@@ -98,6 +99,80 @@ class PasteAccessibilityService : AccessibilityService() {
             } catch (_: Throwable) {
                 PasteResult.NoField
             }
+        }
+
+        /**
+         * Границы сфокусированного редактируемого поля на экране — чтобы
+         * панель вставки ВСТАЛА НЕ ЗАКРЫВАЯ его (требование пользователя:
+         * поле обязано оставаться видимым, иначе вставлять некуда).
+         * Binder-чтение — с любого потока, бюджет узлов ограничен.
+         */
+        fun focusedFieldBounds(selfPkg: String): Rect? {
+            val service = instance ?: return null
+            return try {
+                val node = findEditableNode(service, selfPkg) ?: return null
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                if (rect.isEmpty) null else rect
+            } catch (_: Throwable) {
+                null
+            }
+        }
+
+        /**
+         * Вставка текста В ПОЗИЦИЮ КУРСОРА сфокусированного поля (не заменяет
+         * весь текст): читает текущий текст и выделение узла, склеивает
+         * «до курсора + вставка + после» и пишет одним ACTION_SET_TEXT.
+         * Нет текста/выделения — аппенд в конец; поле пустое — просто запись.
+         * Binder-вызов — звать с рабочего потока.
+         */
+        fun pasteAtCursor(selfPkg: String, text: String): PasteResult {
+            val service = instance ?: return PasteResult.NoService
+            return try {
+                val node = findEditableNode(service, selfPkg) ?: return PasteResult.NoField
+                val current = node.text
+                val args = Bundle()
+                val payload = if (current.isNullOrEmpty()) {
+                    text
+                } else {
+                    val start = node.textSelectionStart.coerceIn(0, current.length)
+                    val end = node.textSelectionEnd.coerceIn(start, current.length)
+                    // Выделение есть — заменяем его; курсор — вставляем в него.
+                    buildString {
+                        append(current.subSequence(0, start))
+                        append(text)
+                        append(current.subSequence(end, current.length))
+                    }
+                }
+                args.putCharSequence(
+                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, payload
+                )
+                val ok = try {
+                    node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                } catch (_: Throwable) { false }
+                if (ok) PasteResult.Pasted
+                else PasteResult.Rejected(node.className?.toString() ?: "?")
+            } catch (_: Throwable) {
+                PasteResult.NoField
+            }
+        }
+
+        /** Общий поиск целевого узла: сфокусированное поле, иначе первый editable. */
+        private fun findEditableNode(
+            service: PasteAccessibilityService,
+            selfPkg: String,
+        ): AccessibilityNodeInfo? {
+            val windowList = try { service.windows } catch (_: Throwable) { null } ?: return null
+            for (window in windowList.sortedByDescending { it.isActive }) {
+                val root = try { window.root } catch (_: Throwable) { null } ?: continue
+                if (root.packageName == selfPkg) continue
+                val focused = try {
+                    root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                } catch (_: Throwable) { null }
+                if (focused != null && focused.isEditable) return focused
+                findFirstEditable(root)?.let { return it }
+            }
+            return null
         }
 
         /** Fallback: первый редактируемый узел окна (обход без фокуса ввода). */
