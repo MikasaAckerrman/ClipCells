@@ -26,6 +26,7 @@ import android.widget.GridView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import com.clipcells.app.CLIP_SAFE_CHARS
 import com.clipcells.app.data.CellWithMessages
 import com.clipcells.app.data.ClipCellsDatabase
 import kotlin.math.abs
