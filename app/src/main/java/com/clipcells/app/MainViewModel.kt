@@ -95,8 +95,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     throw TooLargeClipException(text.length, text)
                 }
                 android.util.Log.i(TAG, "copySelected cell=$cellId messages=$count chars=${text.length} verified")
-                count
-            }.onSuccess(onCopied).onFailure(onError)
+                count to text
+            }.onSuccess { (c, t) -> onCopied(c, t) }.onFailure(onError)
         }
     }
 

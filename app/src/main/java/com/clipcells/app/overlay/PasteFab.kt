@@ -170,25 +170,25 @@ object PasteFab {
                 val result = PasteAccessibilityService.pasteIntoFocusedField(selfPkg, text)
                 main.post {
                     when (result) {
-                        is PasteAccessibilityService.Result.Pasted -> {
+                        PasteResult.Pasted -> {
                             performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
                             hide()
                         }
-                        is PasteAccessibilityService.Result.NoService -> {
+                        PasteResult.NoService -> {
                             Toast.makeText(
                                 context,
                                 "Вставка недоступна — включите сервис в специальных возможностях ClipCells",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
-                        is PasteAccessibilityService.Result.NoField -> {
+                        PasteResult.NoField -> {
                             Toast.makeText(
                                 context,
                                 "Нет поля ввода — тапните в поле под кнопкой и нажмите ещё раз",
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
-                        is PasteAccessibilityService.Result.Rejected -> {
+                        is PasteResult.Rejected -> {
                             Toast.makeText(
                                 context,
                                 "Поле не приняло текст (${result.nodeClass}) — используйте «Поделиться»",

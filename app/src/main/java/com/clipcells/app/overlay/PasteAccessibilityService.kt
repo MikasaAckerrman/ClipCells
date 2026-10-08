@@ -8,6 +8,14 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
+/** Результат прямой вставки в поле. */
+sealed interface PasteResult {
+    object Pasted : PasteResult
+    object NoService : PasteResult
+    object NoField : PasteResult
+    data class Rejected(val nodeClass: String) : PasteResult
+}
+
 /**
  * Прямая вставка текста в поле ввода ДРУГОГО приложения — в обход буфера обмена
  * и клавиатуры (v0.14: Gboard затирает системный буфер своим payload ~20МБ и
@@ -54,20 +62,13 @@ class PasteAccessibilityService : AccessibilityService() {
             }
         }
 
-        sealed interface Result {
-            object Pasted : Result
-            object NoService : Result
-            object NoField : Result
-            data class Rejected(val nodeClass: String) : Result
-        }
-
         /**
          * Вставляет [text] в сфокусированное редактируемое поле активного
          * чужого окна. Binder-вызов — звать с рабочего потока. Наш собственный
          * оверлей пропускается, свои поля не трогаем.
          */
-        fun pasteIntoFocusedField(selfPkg: String, text: String): Result {
-            val service = instance ?: return Result.NoService
+        fun pasteIntoFocusedField(selfPkg: String, text: String): PasteResult {
+            val service = instance ?: return PasteResult.NoService
             return try {
                 val windowList = service.windows
                 for (window in windowList.sortedByDescending { it.isActive }) {
@@ -83,18 +84,19 @@ class PasteAccessibilityService : AccessibilityService() {
                         else -> findFirstEditable(root)
                     } ?: continue
 
-                    val args = Bundle().putCharSequence(
+                    val args = Bundle()
+                    args.putCharSequence(
                         AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text
                     )
                     val ok = try {
                         node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
                     } catch (_: Throwable) { false }
-                    if (ok) return Result.Pasted
-                    return Result.Rejected(node.className?.toString() ?: "?")
+                    if (ok) return PasteResult.Pasted
+                    return PasteResult.Rejected(node.className?.toString() ?: "?")
                 }
-                Result.NoField
+                PasteResult.NoField
             } catch (_: Throwable) {
-                Result.NoField
+                PasteResult.NoField
             }
         }
 
