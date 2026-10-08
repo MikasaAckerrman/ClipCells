@@ -39,7 +39,7 @@ class OverlayTrampolineActivity : Activity() {
         overridePendingTransition(0, 0)
     }
 
-    private companion object {
+    companion object {
         const val EXTRA_TEST_COPY = "test_copy"
         const val EXTRA_PASTE_MODE = "paste_mode"
     }
