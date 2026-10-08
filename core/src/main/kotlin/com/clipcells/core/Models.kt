@@ -28,6 +28,6 @@ data class CopyPlan(
     val items: List<CopyItem>,
 )
 
-const val DEFAULT_COPY_INTERVAL_MILLIS = 1_000L
-const val MIN_COPY_INTERVAL_MILLIS = 300L
+const val DEFAULT_COPY_INTERVAL_MILLIS = 250L
+const val MIN_COPY_INTERVAL_MILLIS = 50L
 const val MAX_COPY_INTERVAL_MILLIS = 3_000L

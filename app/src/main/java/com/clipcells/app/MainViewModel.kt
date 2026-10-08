@@ -47,20 +47,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun copyWhole(cellId: Long, onError: (Throwable) -> Unit) {
-        startQueue(onError) { repository.queueWholeCell(cellId) }
+        advanceOrStart(cellId, onError) { repository.queueWholeCell(cellId) }
     }
 
     fun copySelected(cellId: Long, selectedIds: List<Long>, onError: (Throwable) -> Unit) {
         if (selectedIds.isEmpty()) return
-        startQueue(onError) { repository.queueSelection(cellId, selectedIds) }
+        advanceOrStart(cellId, onError) { repository.queueSelection(cellId, selectedIds) }
     }
 
-    private fun startQueue(onError: (Throwable) -> Unit, prepare: suspend () -> Int) {
+    /**
+     * Tap on a cell while its own queue is alive: ADVANCE — the next message
+     * lands in the clipboard instantly (a ~ms binder write), the queue keeps
+     * its position and its pacing. A tap on a DIFFERENT cell (or when no
+     * queue is running) starts a fresh queue as before. This replaces the
+     * restart-from-zero race: the pace belongs to the user's taps, the
+     * interval is only the idle auto-advance.
+     */
+    private fun advanceOrStart(cellId: Long, onError: (Throwable) -> Unit, prepare: suspend () -> Int) {
         viewModelScope.launch {
             runCatching {
-                pendingCount = prepare()
                 val context = getApplication<Application>()
-                context.startService(CopyService.startIntent(context))
+                val active = queue.value
+                if (active != null && active.cellId == cellId) {
+                    context.startService(CopyService.advanceIntent(context))
+                } else {
+                    pendingCount = prepare()
+                    context.startService(CopyService.startIntent(context))
+                }
             }.onFailure {
                 pendingCount = null
                 onError(it)

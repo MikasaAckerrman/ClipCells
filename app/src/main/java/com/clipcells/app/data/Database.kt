@@ -56,6 +56,8 @@ data class CellWithMessages(
 data class CopyQueueEntity(
     @PrimaryKey val id: Int = SINGLE_QUEUE_ID,
     val title: String,
+    /** Owning cell — lets a tap on the SAME cell advance the queue instead of restarting it. */
+    val cellId: Long = -1L,
     val intervalMillis: Long,
     val nextIndex: Int,
     val revision: Long,
@@ -119,7 +121,7 @@ interface QueueDao {
 
 @Database(
     entities = [CellEntity::class, MessageEntity::class, CopyQueueEntity::class, CopyQueueItemEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class ClipCellsDatabase : RoomDatabase() {
@@ -129,12 +131,19 @@ abstract class ClipCellsDatabase : RoomDatabase() {
     companion object {
         @Volatile private var instance: ClipCellsDatabase? = null
 
+        /** v1→v2: copy_queue gains the owning cellId (advance-instead-of-restart). */
+        private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE copy_queue ADD COLUMN cellId INTEGER NOT NULL DEFAULT -1")
+            }
+        }
+
         fun get(context: Context): ClipCellsDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ClipCellsDatabase::class.java,
                 "clipcells.db",
-            ).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
         }
     }
 }

@@ -99,6 +99,7 @@ class CellRepository(private val db: ClipCellsDatabase) {
             queues.putQueue(
                 CopyQueueEntity(
                     title = plan.cellName,
+                    cellId = plan.cellId,
                     intervalMillis = plan.intervalMillis,
                     nextIndex = 0,
                     revision = revision,

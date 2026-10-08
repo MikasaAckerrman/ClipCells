@@ -24,7 +24,7 @@ class CopyPlanFactoryTest {
         val plan = CopyPlanFactory().forWholeCell(cell)
 
         assertEquals(listOf("первое", "второе", "третье"), plan.items.map { it.text })
-        assertEquals(1_000L, plan.intervalMillis)
+        assertEquals(250L, plan.intervalMillis)
         assertEquals("Ответы", plan.cellName)
     }
 
@@ -40,6 +40,13 @@ class CopyPlanFactoryTest {
         val plan = CopyPlanFactory().forWholeCell(cell.copy(intervalMillis = 9_000))
 
         assertEquals(3_000L, plan.intervalMillis)
+    }
+
+    @Test
+    fun `too-fast interval is raised to the safe floor`() {
+        val plan = CopyPlanFactory().forWholeCell(cell.copy(intervalMillis = 1))
+
+        assertEquals(50L, plan.intervalMillis)
     }
 
     @Test
