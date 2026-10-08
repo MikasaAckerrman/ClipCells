@@ -50,8 +50,9 @@ import kotlin.math.abs
  *  - Closes ONLY via its ✕ button (BACK is consumed by the root on
  *    purpose); taps outside the panel pass through to the app underneath
  *    (FLAG_NOT_TOUCH_MODAL).
- *  - Tap a cell copies its NEXT message (per-cell rotation in [CellCursor],
- *    process-lifetime state); long-press opens that cell's message list.
+ *  - Tap a cell copies ALL its messages as ONE clipboard piece (v0.13:
+ *    instant whole-cell copy — no queues, no counters). Long-press opens
+ *    the cell's message list; tapping a message copies just that one.
  *    Every write goes through [OverlayCopier] — clipboard writes only while
  *    the panel window holds focus (the Android 10+ rule), with a
  *    pending-flush retry for the focus-transfer instant.
@@ -62,9 +63,6 @@ object OverlayPanel {
     @Volatile private var liveWm: WindowManager? = null
     @Volatile private var liveUi: PanelUi? = null
     @Volatile private var dismissing = false
-
-    /** Process-lifetime rotation state — survives close/reopen. */
-    private val cursor = CellCursor()
 
     fun isShowing(): Boolean = liveRoot != null
 
@@ -117,7 +115,7 @@ object OverlayPanel {
     private fun show(app: Context, cells: List<CellWithMessages>) {
         val wm = app.getSystemService(WindowManager::class.java) ?: return
         hide(animate = false) // replace a stale window if one survived
-        val ui = PanelUi(app, wm, cells, cursor) { hide(animate = true) }
+        val ui = PanelUi(app, wm, cells) { hide(animate = true) }
         ui.build()
         try {
             wm.addView(ui.root, ui.windowParams())
@@ -193,7 +191,6 @@ object OverlayPanel {
         val app: Context,
         private val wm: WindowManager,
         private val cells: List<CellWithMessages>,
-        private val cursor: CellCursor,
         private val onClose: () -> Unit,
     ) {
         private val dp = dpFactor()
@@ -243,7 +240,7 @@ object OverlayPanel {
                 ).apply { topMargin = 8 * dp }
             })
 
-            copier = OverlayCopier(app, root, ::onCopyResult) { cancelCopyQueue() }
+            copier = OverlayCopier(app, root, ::onCopyResult)
         }
 
         fun windowParams(): WindowManager.LayoutParams {
@@ -354,14 +351,13 @@ object OverlayPanel {
         // ----------------------------------------------------------- copy
 
         private fun onCellTap(cell: CellWithMessages) {
-            val messages = cell.orderedMessages
-            if (messages.isEmpty()) {
+            val texts = cell.orderedMessages.map { it.text.trim() }.filter { it.isNotEmpty() }
+            if (texts.isEmpty()) {
                 feedback("Пустая ячейка", ACCENT)
                 return
             }
-            val index = cursor.advance(cell.cell.id, messages.size)
             root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-            copier.copy(cell.cell.name, messages[index].text, "${index + 1}/${messages.size}")
+            copier.copy(cell.cell.name, texts.joinToString("\n"), "сообщений: ${texts.size}")
         }
 
         private fun onMessageTap(cell: CellWithMessages, position: Int) {
@@ -388,21 +384,8 @@ object OverlayPanel {
         }
 
         private fun showHint() {
-            feedbackView.text = "Тап — следующее сообщение · удержание — выбор"
+            feedbackView.text = "Тап — вся ячейка · удержание — выбор сообщения"
             feedbackView.setTextColor(Color.parseColor(TEXT_FAINT))
-        }
-
-        private fun cancelCopyQueue() {
-            // The in-app queue only runs while the app is focused; when the
-            // overlay is up the queue is paused, so this is a best-effort
-            // no-op most of the time.
-            try {
-                app.startService(
-                    android.content.Intent(app, com.clipcells.app.copy.CopyService::class.java)
-                        .setAction(com.clipcells.app.copy.CopyService.ACTION_CANCEL)
-                )
-            } catch (_: Exception) {
-            }
         }
 
         // ---------------------------------------------------------- detail
@@ -471,7 +454,6 @@ object OverlayPanel {
         private inner class CellCardView(context: Context) : FrameLayout(context) {
             private val nameView: TextView
             private val countView: TextView
-            private val badgeView: TextView
 
             init {
                 isClickable = true
@@ -509,27 +491,11 @@ object OverlayPanel {
                 ).apply {
                     gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; bottomMargin = 3 * dp
                 })
-                badgeView = TextView(context).apply {
-                    textSize = 8f
-                    typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                    setTextColor(Color.parseColor(ACCENT))
-                }
-                addView(badgeView, FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    gravity = Gravity.TOP or Gravity.END; topMargin = 4 * dp; marginEnd = 6 * dp
-                })
             }
 
-            fun bind(cell: CellWithMessages, peekIndex: Int) {
+            fun bind(cell: CellWithMessages) {
                 nameView.text = cell.cell.name
                 countView.text = "${cell.messages.size} сообщ."
-                if (cell.messages.size > 1) {
-                    badgeView.text = "→${peekIndex + 1}/${cell.messages.size}"
-                    badgeView.visibility = View.VISIBLE
-                } else {
-                    badgeView.visibility = View.INVISIBLE
-                }
                 contentDescription = "${cell.cell.name}, ${cell.messages.size} сообщений"
                 setOnClickListener { onCellTap(cell) }
                 setOnLongClickListener {
@@ -552,7 +518,7 @@ object OverlayPanel {
                         AbsListView.LayoutParams.MATCH_PARENT, 52 * dp
                     )
                 }
-                card.bind(cell, cursor.peek(cell.cell.id, cell.messages.size))
+                card.bind(cell)
                 return card
             }
         }

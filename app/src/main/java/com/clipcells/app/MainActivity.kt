@@ -70,7 +70,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.clipcells.app.data.CellWithMessages
-import com.clipcells.app.data.CopyQueueEntity
 import com.clipcells.app.overlay.OverlayPanel
 import com.clipcells.app.ui.CellCard
 import com.clipcells.app.ui.CellEditorDialog
@@ -112,7 +111,6 @@ class MainActivity : ComponentActivity() {
 private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     val cellsOrNull by vm.cells.collectAsStateWithLifecycle()
     val cells = cellsOrNull
-    val queueState by vm.queue.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("display", 0) }
     var columns by remember { mutableIntStateOf(prefs.getInt("columns", 2).coerceIn(2, 5)) }
@@ -125,7 +123,6 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     var deleteConfirm by remember { mutableStateOf(false) }
     var selectedCells by remember { mutableStateOf(setOf<Long>()) }
     var error by remember { mutableStateOf<String?>(null) }
-    var lastQueue by remember { mutableStateOf<CopyQueueEntity?>(null) }
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val filteredCells = remember(cells, searchQuery) {
@@ -161,19 +158,6 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
             )
         )
     }
-
-    LaunchedEffect(queueState) {
-        val previous = lastQueue
-        lastQueue = queueState
-        if (previous != null && queueState == null) {
-            val count = vm.consumePendingCount()
-            snackbar.showSnackbar(
-                message = count?.let(::copiedText) ?: "Копирование завершено",
-                duration = SnackbarDuration.Short,
-            )
-        }
-    }
-
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         containerColor = MaterialTheme.colorScheme.background,
@@ -260,20 +244,18 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(filteredCells, key = { it.cell.id }, contentType = { "cell" }) { cell ->
-                        // Tap-driven queue progress badge (v0.12.2): the active
-                        // cell shows which message the NEXT tap will copy.
-                        val progressBadge = queueState?.takeIf {
-                            it.cellId == cell.cell.id && it.totalCount > 0 && it.nextIndex < it.totalCount
-                        }?.let { "→${it.nextIndex + 1}/${it.totalCount}" }
                         CellCard(
                             cell = cell,
                             height = cardHeight,
                             mode = mode,
                             selected = cell.cell.id in selectedCells,
-                            queueProgress = progressBadge,
                             onTap = {
                                 when (mode) {
-                                    HomeMode.NORMAL -> vm.copyWhole(cell.cell.id) { error = it.message }
+                                    HomeMode.NORMAL -> vm.copyWhole(
+                                        cell.cell.id,
+                                        onCopied = { count -> scope.launch { snackbar.showSnackbar(copiedText(count)) } },
+                                        onError = { error = it.message },
+                                    )
                                     HomeMode.EDIT -> { editorCell = cell; showEditor = true }
                                     HomeMode.DELETE -> selectedCells = if (cell.cell.id in selectedCells) selectedCells - cell.cell.id else selectedCells + cell.cell.id
                                 }
@@ -309,7 +291,11 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
             onDismiss = { selectorCell = null },
             onCopy = { ids ->
                 selectorCell = null
-                if (ids.isNotEmpty()) vm.copySelected(cell.cell.id, ids) { error = it.message }
+                if (ids.isNotEmpty()) vm.copySelected(
+                            cell.cell.id, ids,
+                            onCopied = { count -> scope.launch { snackbar.showSnackbar(copiedText(count)) } },
+                            onError = { error = it.message },
+                        )
             },
         )
     }

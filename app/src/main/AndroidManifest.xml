@@ -26,10 +26,6 @@
             </intent-filter>
         </activity>
 
-        <service
-            android:name=".copy.CopyService"
-            android:exported="false" />
-
         <!-- Invisible launcher for the floating window: starts the overlay
              service and finishes in the same frame. The user's current app
              never leaves the screen. -->

@@ -1,9 +1,6 @@
 package com.clipcells.app.data
 
 import androidx.room.withTransaction
-import com.clipcells.core.Cell
-import com.clipcells.core.CellMessage
-import com.clipcells.core.CopyPlanFactory
 import kotlinx.coroutines.flow.Flow
 
 data class CellDraft(
@@ -17,8 +14,6 @@ data class CellDraft(
 
 class CellRepository(private val db: ClipCellsDatabase) {
     private val cells = db.cellDao()
-    private val queues = db.queueDao()
-    private val plans = CopyPlanFactory()
 
     fun observeCells(): Flow<List<CellWithMessages>> = cells.observeAll()
 
@@ -67,43 +62,24 @@ class CellRepository(private val db: ClipCellsDatabase) {
         }
     }
 
-    suspend fun queueWholeCell(cellId: Long): Int = queue(cellId, null)
-
-    suspend fun queueSelection(cellId: Long, selectedIds: List<Long>): Int = queue(cellId, selectedIds)
-
-    fun observeQueue(): Flow<CopyQueueEntity?> = queues.observeQueue()
-
-    private suspend fun queue(cellId: Long, selectedIds: List<Long>?): Int {
+    /**
+     * Все сообщения ячейки одним куском (v0.13: тап = мгновенная копия всей
+     * ячейки; очередей больше не существует). Возвращает текст и количество
+     * сообщений для фидбека.
+     */
+    suspend fun cellContent(cellId: Long): Pair<String, Int> {
         val stored = requireNotNull(cells.get(cellId)) { "Ячейка не найдена" }
-        val cell = Cell(
-            id = stored.cell.id,
-            name = stored.cell.name,
-            position = stored.cell.position,
-            colorArgb = stored.cell.colorArgb,
-            icon = stored.cell.icon,
-            intervalMillis = stored.cell.intervalMillis,
-            messages = stored.messages.map { CellMessage(it.id, it.text, it.position) },
-        )
-        val plan = if (selectedIds == null) plans.forWholeCell(cell) else plans.forSelection(cell, selectedIds)
-        val size = plan.items.size
+        val texts = stored.messages.sortedBy { it.position }.map { it.text.trim() }.filter { it.isNotEmpty() }
+        require(texts.isNotEmpty()) { "Пустая ячейка" }
+        return texts.joinToString("\n") to texts.size
+    }
 
-        return db.withTransaction {
-            val revision = (queues.getQueue()?.revision ?: 0L) + 1L
-            queues.deleteQueue()
-            queues.putQueue(
-                CopyQueueEntity(
-                    title = plan.cellName,
-                    cellId = plan.cellId,
-                    intervalMillis = plan.intervalMillis,
-                    totalCount = plan.items.size,
-                    nextIndex = 0,
-                    revision = revision,
-                ),
-            )
-            queues.putItems(plan.items.mapIndexed { index, item ->
-                CopyQueueItemEntity(position = index, sourceMessageId = item.sourceMessageId, text = item.text)
-            })
-            size
-        }
+    /** Выбранные сообщения ячейки одним куском, в порядке тапов юзера. */
+    suspend fun selectedContent(cellId: Long, selectedIds: List<Long>): Pair<String, Int> {
+        val stored = requireNotNull(cells.get(cellId)) { "Ячейка не найдена" }
+        val byId = stored.messages.associateBy { it.id }
+        val texts = selectedIds.mapNotNull { byId[it]?.text?.trim() }.filter { it.isNotEmpty() }
+        require(texts.isNotEmpty()) { "Ничего не выбрано" }
+        return texts.joinToString("\n") to texts.size
     }
 }

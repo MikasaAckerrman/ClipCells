@@ -20,7 +20,6 @@ class OverlayCopier(
     context: Context,
     private val focusView: View,
     private val onResult: (Result) -> Unit,
-    private val cancelCopyQueue: () -> Unit,
 ) {
 
     sealed interface Result {
@@ -69,16 +68,10 @@ class OverlayCopier(
     }
 
     /**
-     * Puts [text] into the clipboard as [label]. Cancels the in-app copy queue
-     * first: a running CopyService would fight the overlay for the buffer.
+     * Puts [text] into the clipboard as [label] (v0.13: whole-cell instant
+     * copy — there is no queue to cancel anymore).
      */
     fun copy(label: String, text: String, order: String) {
-        try {
-            cancelCopyQueue()
-        } catch (_: Exception) {
-            // Queue cancel is best-effort; copying must proceed regardless.
-        }
-
         val item = Pending(label, text, order)
         if (focusView.hasWindowFocus()) {
             write(item)

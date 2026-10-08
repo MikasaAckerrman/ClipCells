@@ -16,18 +16,4 @@ data class CellMessage(
     val position: Int,
 )
 
-data class CopyItem(
-    val sourceMessageId: Long,
-    val text: String,
-)
 
-data class CopyPlan(
-    val cellId: Long,
-    val cellName: String,
-    val intervalMillis: Long,
-    val items: List<CopyItem>,
-)
-
-const val DEFAULT_COPY_INTERVAL_MILLIS = 250L
-const val MIN_COPY_INTERVAL_MILLIS = 50L
-const val MAX_COPY_INTERVAL_MILLIS = 3_000L

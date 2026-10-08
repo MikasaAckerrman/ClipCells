@@ -74,7 +74,6 @@ internal fun CellCard(
     selected: Boolean,
     onTap: () -> Unit,
     onHold: () -> Unit,
-    queueProgress: String? = null,
 ) {
     val holdProgress = remember(cell.cell.id) { Animatable(0f) }
     val press = remember(cell.cell.id) { Animatable(0f) }
@@ -171,21 +170,6 @@ internal fun CellCard(
                 ) {
                     Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
                 }
-            }
-            // Tap-driven queue state: which message the NEXT tap copies.
-            if (queueProgress != null && mode == HomeMode.NORMAL) {
-                Text(
-                    queueProgress,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .background(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                            MaterialTheme.shapes.extraSmall,
-                        )
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
             }
             if (mode == HomeMode.EDIT) {
                 Text(

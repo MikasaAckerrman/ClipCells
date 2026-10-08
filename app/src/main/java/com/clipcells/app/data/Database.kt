@@ -7,8 +7,8 @@ import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
-import androidx.room.Insert
 import androidx.room.OnConflictStrategy
+import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Relation
@@ -52,37 +52,6 @@ data class CellWithMessages(
     val orderedMessages: List<MessageEntity> get() = messages.sortedBy(MessageEntity::position)
 }
 
-@Entity(tableName = "copy_queue")
-data class CopyQueueEntity(
-    @PrimaryKey val id: Int = SINGLE_QUEUE_ID,
-    val title: String,
-    /** Owning cell — lets a tap on the SAME cell advance the queue instead of restarting it. */
-    val cellId: Long = -1L,
-    val intervalMillis: Long,
-    /** Total items when the queue was created — for the →n/N progress badge. */
-    val totalCount: Int = 0,
-    val nextIndex: Int,
-    val revision: Long,
-)
-
-@Entity(
-    tableName = "copy_queue_items",
-    primaryKeys = ["queueId", "position"],
-    foreignKeys = [ForeignKey(
-        entity = CopyQueueEntity::class,
-        parentColumns = ["id"],
-        childColumns = ["queueId"],
-        onDelete = ForeignKey.CASCADE,
-    )],
-    indices = [Index("queueId")],
-)
-data class CopyQueueItemEntity(
-    val queueId: Int = SINGLE_QUEUE_ID,
-    val position: Int,
-    val sourceMessageId: Long,
-    val text: String,
-)
-
 @Dao
 interface CellDao {
     @Transaction
@@ -107,28 +76,13 @@ interface CellDao {
     @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM cells") suspend fun nextPosition(): Int
 }
 
-@Dao
-interface QueueDao {
-    @Query("SELECT * FROM copy_queue WHERE id = 1") suspend fun getQueue(): CopyQueueEntity?
-    @Query("SELECT * FROM copy_queue WHERE id = 1") fun observeQueue(): Flow<CopyQueueEntity?>
-    @Query("SELECT * FROM copy_queue_items WHERE queueId = 1 ORDER BY position")
-    suspend fun getItems(): List<CopyQueueItemEntity>
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putQueue(queue: CopyQueueEntity)
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun putItems(items: List<CopyQueueItemEntity>)
-    @Query("DELETE FROM copy_queue WHERE id = 1") suspend fun deleteQueue()
-    @Query("UPDATE copy_queue SET nextIndex=:nextIndex WHERE id=1 AND revision=:revision")
-    suspend fun advance(revision: Long, nextIndex: Int): Int
-    @Query("DELETE FROM copy_queue WHERE id=1 AND revision=:revision") suspend fun finish(revision: Long): Int
-}
-
 @Database(
-    entities = [CellEntity::class, MessageEntity::class, CopyQueueEntity::class, CopyQueueItemEntity::class],
-    version = 3,
+    entities = [CellEntity::class, MessageEntity::class],
+    version = 4,
     exportSchema = false,
 )
 abstract class ClipCellsDatabase : RoomDatabase() {
     abstract fun cellDao(): CellDao
-    abstract fun queueDao(): QueueDao
 
     companion object {
         @Volatile private var instance: ClipCellsDatabase? = null
@@ -147,14 +101,20 @@ abstract class ClipCellsDatabase : RoomDatabase() {
             }
         }
 
+        /** v3→v4: очереди удалены (v0.13 — тап копирует всю ячейку сразу); таблицы дропнуты. */
+        private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS copy_queue_items")
+                db.execSQL("DROP TABLE IF EXISTS copy_queue")
+            }
+        }
+
         fun get(context: Context): ClipCellsDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 ClipCellsDatabase::class.java,
                 "clipcells.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { instance = it }
         }
     }
 }
-
-const val SINGLE_QUEUE_ID = 1
