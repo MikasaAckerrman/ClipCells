@@ -158,6 +158,14 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
             )
         )
     }
+    fun onCopyError(t: Throwable) {
+        if (t is TooLargeClipException) {
+            scope.launch { snackbar.showSnackbar(t.userMessage, duration = SnackbarDuration.Long) }
+        } else {
+            error = t.message
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         containerColor = MaterialTheme.colorScheme.background,
@@ -254,7 +262,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                                     HomeMode.NORMAL -> vm.copyWhole(
                                         cell.cell.id,
                                         onCopied = { count -> scope.launch { snackbar.showSnackbar(copiedText(count)) } },
-                                        onError = { error = it.message },
+                                        onError = { onCopyError(it) },
                                     )
                                     HomeMode.EDIT -> { editorCell = cell; showEditor = true }
                                     HomeMode.DELETE -> selectedCells = if (cell.cell.id in selectedCells) selectedCells - cell.cell.id else selectedCells + cell.cell.id
@@ -294,7 +302,7 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                 if (ids.isNotEmpty()) vm.copySelected(
                             cell.cell.id, ids,
                             onCopied = { count -> scope.launch { snackbar.showSnackbar(copiedText(count)) } },
-                            onError = { error = it.message },
+                            onError = { onCopyError(it) },
                         )
             },
         )

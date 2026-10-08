@@ -356,15 +356,31 @@ object OverlayPanel {
                 feedback("Пустая ячейка", ACCENT)
                 return
             }
+            val joined = texts.joinToString("\n")
+            if (joined.length > CLIP_SAFE_CHARS) {
+                // Буфер Android держит ~1МБ (binder-лимит): гигантская запись
+                // тихо проваливается и вставка отдаёт старый клип — отказ честно.
+                feedback("Текст ${joined.length} симв. — буфер держит ~1МБ, копируй по одному", ACCENT)
+                return
+            }
             root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-            copier.copy(cell.cell.name, texts.joinToString("\n"), "сообщений: ${texts.size}")
+            android.util.Log.i(
+                "ClipCellsCopy",
+                "overlay cell=${cell.cell.id} messages=${texts.size} chars=${joined.length}"
+            )
+            copier.copy(cell.cell.name, joined, "сообщений: ${texts.size}")
         }
 
         private fun onMessageTap(cell: CellWithMessages, position: Int) {
             val messages = cell.orderedMessages
             if (position !in messages.indices) return
+            val text = messages[position].text
+            if (text.length > CLIP_SAFE_CHARS) {
+                feedback("Сообщение ${text.length} симв. — больше буфера (~1МБ)", ACCENT)
+                return
+            }
             root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-            copier.copy(cell.cell.name, messages[position].text, "сообщение ${position + 1}")
+            copier.copy(cell.cell.name, text, "сообщение ${position + 1}")
         }
 
         private fun onCopyResult(result: OverlayCopier.Result) {
