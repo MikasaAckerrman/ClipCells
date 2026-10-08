@@ -37,6 +37,20 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Прямая вставка в поля чужих приложений (в обход буфера/Gboard). -->
+        <service
+            android:name=".overlay.PasteAccessibilityService"
+            android:label="@string/paste_a11y_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/paste_accessibility" />
+        </service>
+
         <!-- Invisible launcher for the floating window: starts the overlay
              service and finishes in the same frame. The user's current app
              never leaves the screen. -->

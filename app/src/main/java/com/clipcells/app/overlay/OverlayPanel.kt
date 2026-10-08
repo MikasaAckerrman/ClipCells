@@ -373,7 +373,14 @@ object OverlayPanel {
                 "ClipCellsCopy",
                 "overlay cell=${cell.cell.id} messages=${texts.size} chars=${joined.length}"
             )
+            // Буфер — best-effort (Gboard может затереть), главный путь вставки — FAB.
             copier.copy(cell.cell.name, joined, "сообщений: ${texts.size}")
+            if (joined.length <= CLIP_SAFE_CHARS) {
+                PasteFab.show(app, cell.cell.name, joined)
+                feedback("Скопировано · кнопка «Вставить» внизу ставит текст прямо в поле", OK_GREEN)
+            } else {
+                com.clipcells.app.ShareAsFile.share(app, cell.cell.name, joined)
+            }
         }
 
         private fun onMessageTap(cell: CellWithMessages, position: Int) {

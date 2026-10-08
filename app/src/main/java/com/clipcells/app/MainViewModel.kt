@@ -55,7 +55,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * отдаёт ПРЕДЫДУЩИЙ клип (одно сообщение). Поэтому: пред-проверка размера,
      * затем верификация записи чтением, и честный фидбек при провале.
      */
-    fun copyWhole(cellId: Long, onCopied: (Int) -> Unit, onError: (Throwable) -> Unit) {
+    fun copyWhole(cellId: Long, onCopied: (Int, String) -> Unit, onError: (Throwable) -> Unit) {
         viewModelScope.launch {
             runCatching {
                 val (text, count) = repository.cellContent(cellId)
@@ -78,7 +78,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Выбранные сообщения — одним куском, в порядке выбора. */
-    fun copySelected(cellId: Long, selectedIds: List<Long>, onCopied: (Int) -> Unit, onError: (Throwable) -> Unit) {
+    fun copySelected(cellId: Long, selectedIds: List<Long>, onCopied: (Int, String) -> Unit, onError: (Throwable) -> Unit) {
         if (selectedIds.isEmpty()) return
         viewModelScope.launch {
             runCatching {

@@ -72,6 +72,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.clipcells.app.data.CellWithMessages
 import com.clipcells.app.overlay.OverlayPanel
+import com.clipcells.app.overlay.PasteFab
 import com.clipcells.app.ui.CellCard
 import com.clipcells.app.ui.CellEditorDialog
 import com.clipcells.app.ui.ClipCellsTheme
@@ -272,7 +273,10 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                                 when (mode) {
                                     HomeMode.NORMAL -> vm.copyWhole(
                                         cell.cell.id,
-                                        onCopied = { count -> scope.launch { snackbar.showSnackbar(copiedText(count)) } },
+                                        onCopied = { count, text ->
+                                            PasteFab.show(context, cell.cell.name, text)
+                                            scope.launch { snackbar.showSnackbar(copiedText(count) + " · кнопка «Вставить» ставит текст прямо в поле") }
+                                        },
                                         onError = { onCopyError(it) },
                                     )
                                     HomeMode.EDIT -> { editorCell = cell; showEditor = true }
@@ -312,7 +316,10 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                 selectorCell = null
                 if (ids.isNotEmpty()) vm.copySelected(
                             cell.cell.id, ids,
-                            onCopied = { count -> scope.launch { snackbar.showSnackbar(copiedText(count)) } },
+                            onCopied = { count, text ->
+                                PasteFab.show(context, "выбранное", text)
+                                scope.launch { snackbar.showSnackbar(copiedText(count) + " · кнопка «Вставить» ставит текст прямо в поле") }
+                            },
                             onError = { onCopyError(it) },
                         )
             },
