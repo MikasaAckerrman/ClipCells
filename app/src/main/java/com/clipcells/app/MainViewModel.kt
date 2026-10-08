@@ -68,12 +68,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     ?.getItemAt(0)?.coerceToText(getApplication())?.toString()
                 if (written != text) {
                     // Запись не прошла (лимит системы) — буфер отдаёт старый клип.
-                    android.util.Log.i(TAG, "copy cell=$cellId VERIFY_FAILED chars=${text.length}")
+                    android.util.Log.i(TAG, "copyWhole cell=$cellId VERIFY_FAILED chars=${text.length}")
                     throw TooLargeClipException(text.length, text)
                 }
                 android.util.Log.i(TAG, "copyWhole cell=$cellId messages=$count chars=${text.length} verified")
-                count
-            }.onSuccess(onCopied).onFailure(onError)
+                count to text
+            }.onSuccess { (c, t) -> onCopied(c, t) }.onFailure(onError)
         }
     }
 
