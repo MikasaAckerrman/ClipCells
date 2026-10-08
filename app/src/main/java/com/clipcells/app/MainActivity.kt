@@ -160,7 +160,17 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     }
     fun onCopyError(t: Throwable) {
         if (t is TooLargeClipException) {
-            scope.launch { snackbar.showSnackbar(t.userMessage, duration = SnackbarDuration.Long) }
+            // Буфер не берёт текст >1МБ — отдать ВСЁ сразу можно файлом через шер.
+            scope.launch {
+                val result = snackbar.showSnackbar(
+                    message = t.userMessage,
+                    actionLabel = "Поделиться",
+                    duration = SnackbarDuration.Long,
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    ShareAsFile.share(context, "ClipCells", t.text)
+                }
+            }
         } else {
             error = t.message
         }

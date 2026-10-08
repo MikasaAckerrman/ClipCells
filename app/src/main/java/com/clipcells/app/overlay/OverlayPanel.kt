@@ -360,8 +360,12 @@ object OverlayPanel {
             val joined = texts.joinToString("\n")
             if (joined.length > CLIP_SAFE_CHARS) {
                 // Буфер Android держит ~1МБ (binder-лимит): гигантская запись
-                // тихо проваливается и вставка отдаёт старый клип — отказ честно.
-                feedback("Текст ${joined.length} симв. — буфер держит ~1МБ, копируй по одному", ACCENT)
+                // тихо проваливается. «Всё сразу» сверх лимита — файлом через шер.
+                android.util.Log.i(
+                    "ClipCellsCopy",
+                    "overlay cell=${cell.cell.id} messages=${texts.size} chars=${joined.length} TOO_LARGE -> share file"
+                )
+                com.clipcells.app.ShareAsFile.share(app, cell.cell.name, joined)
                 return
             }
             root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
@@ -377,7 +381,11 @@ object OverlayPanel {
             if (position !in messages.indices) return
             val text = messages[position].text
             if (text.length > CLIP_SAFE_CHARS) {
-                feedback("Сообщение ${text.length} симв. — больше буфера (~1МБ)", ACCENT)
+                android.util.Log.i(
+                    "ClipCellsCopy",
+                    "overlay msg cell=${cell.cell.id} idx=$position chars=${text.length} TOO_LARGE -> share file"
+                )
+                com.clipcells.app.ShareAsFile.share(app, cell.cell.name, text)
                 return
             }
             root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)

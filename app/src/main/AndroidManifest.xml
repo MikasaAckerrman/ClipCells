@@ -26,6 +26,17 @@
             </intent-filter>
         </activity>
 
+        <!-- «Поделиться файлом» для текстов больше буфера обмена (лимит ~1МБ). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.clipcells.app.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Invisible launcher for the floating window: starts the overlay
              service and finishes in the same frame. The user's current app
              never leaves the screen. -->
