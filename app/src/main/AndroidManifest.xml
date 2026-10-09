@@ -33,6 +33,15 @@
         </activity>
 
         <!-- «Поделиться файлом» для текстов больше буфера обмена (лимит ~1МБ). -->
+        <!-- Автотест вставки E2E (adb: am start .../.TestPasteActivity):
+             своё поле с автофокусом, вставка через реальный a11y-путь,
+             readback и вердикт в лог — БЕЗ тапов по экрану. -->
+        <activity
+            android:name=".TestPasteActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.ClipCells.Trampoline" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="com.clipcells.app.fileprovider"

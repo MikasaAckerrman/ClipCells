@@ -349,13 +349,30 @@ object OverlayPastePanel {
                     // панель на миг становится фокусируемой, пишет, возвращает
                     // NOT_FOCUSABLE; читает буфер само приложение (оно в фокусе).
                     pasteViaClipboard(text, what)
+                } else if (result == PasteResult.NoService) {
+                    // Сервис выбило из списка между запуском и тапом — self-heal
+                    // и одна повторная попытка, затем честный фидбек.
+                    val healed = PasteAccessibilityService.ensureEnabled(app)
+                    val retried = if (healed) {
+                        PasteAccessibilityService.pasteAtCursor(app.packageName, text)
+                    } else null
+                    Handler(Looper.getMainLooper()).post {
+                        pasting = false
+                        android.util.Log.i(TAG, "paste [$what] NoService healed=$healed retry=$retried")
+                        if (retried == PasteResult.Pasted) {
+                            feedback("Вставлено: $what", OK_GREEN)
+                            root.postDelayed({ hide(animate = true) }, 90)
+                        } else {
+                            feedback("Сервис «Прямая вставка» не включён — открой панель ещё раз", ACCENT)
+                        }
+                    }
                 } else {
                     Handler(Looper.getMainLooper()).post {
                         pasting = false
                         when (result) {
-                            PasteResult.NoService ->
-                                feedback("Сервис «Прямая вставка» не включён", ACCENT)
-                            else -> feedback("Нет поля ввода под панелью", ACCENT)
+                            PasteResult.NoField ->
+                                feedback("Нет поля ввода под панелью", ACCENT)
+                            else -> feedback("Поле не приняло текст", ACCENT)
                         }
                     }
                 }

@@ -166,17 +166,28 @@ class PasteAccessibilityService : AccessibilityService() {
          * Нет текста/выделения — аппенд в конец; поле пустое — просто запись.
          * Binder-вызов — звать с рабочего потока.
          */
-        fun pasteAtCursor(selfPkg: String, text: String): PasteResult {
+        fun pasteAtCursor(selfPkg: String, text: String): PasteResult =
+            pasteAtCursorInternal(selfPkg, text, includeSelf = false)
+
+        /** Автотест E2E: не скипать собственный пакет (поле теста — наше). */
+        fun pasteAtCursorForTest(selfPkg: String, text: String): PasteResult =
+            pasteAtCursorInternal(selfPkg, text, includeSelf = true)
+
+        private fun pasteAtCursorInternal(
+            selfPkg: String,
+            text: String,
+            includeSelf: Boolean,
+        ): PasteResult {
             val service = instance ?: return PasteResult.NoService
             return try {
-                val node = findEditableNode(service, selfPkg) ?: return PasteResult.NoField
+                val node = findEditableNode(service, selfPkg, includeSelf) ?: return PasteResult.NoField
                 // Парольные поля не трогаем — политика и безопасность.
                 if (node.isPassword) return PasteResult.Rejected("парольное поле")
                 val ok = setWithCursor(node, text)
                 if (ok) PasteResult.Pasted
                 // Узел мог протухнуть (перестройка окна чата за время вставки) —
                 // перевзять СВЕЖИЙ узел и повторить один раз.
-                val fresh = findEditableNode(service, selfPkg)
+                val fresh = findEditableNode(service, selfPkg, includeSelf)
                 if (!ok && fresh != null && fresh !== node) {
                     if (setWithCursor(fresh, text)) return PasteResult.Pasted
                 }
@@ -216,10 +227,16 @@ class PasteAccessibilityService : AccessibilityService() {
          * здесь — только ACTION_FOCUS + ACTION_PASTE: читает буфер само
          * целевое приложение (оно в фокусе — чтение легально).
          */
-        fun performPasteAction(selfPkg: String): Boolean {
+        fun performPasteAction(selfPkg: String): Boolean =
+            performPasteActionInternal(selfPkg, includeSelf = false)
+
+        fun performPasteActionForTest(selfPkg: String): Boolean =
+            performPasteActionInternal(selfPkg, includeSelf = true)
+
+        private fun performPasteActionInternal(selfPkg: String, includeSelf: Boolean): Boolean {
             val service = instance ?: return false
             return try {
-                val node = findEditableNode(service, selfPkg) ?: return false
+                val node = findEditableNode(service, selfPkg, includeSelf) ?: return false
                 if (node.isPassword) return false
                 node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
                 node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
@@ -236,6 +253,7 @@ class PasteAccessibilityService : AccessibilityService() {
         private fun findEditableNode(
             service: PasteAccessibilityService,
             selfPkg: String,
+            includeSelf: Boolean = false,
         ): AccessibilityNodeInfo? {
             repeat(3) { attempt ->
                 try {
@@ -244,7 +262,7 @@ class PasteAccessibilityService : AccessibilityService() {
                     val windowList = service.windows
                     for (window in windowList.sortedByDescending { it.isActive }) {
                         val root = try { window.root } catch (_: Throwable) { null } ?: continue
-                        if (root.packageName == selfPkg) continue
+                        if (!includeSelf && root.packageName == selfPkg) continue
                         val focused = try {
                             root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
                         } catch (_: Throwable) { null }
@@ -253,7 +271,7 @@ class PasteAccessibilityService : AccessibilityService() {
                     }
                     // 2) Активное окно напрямую — когда список ещё не обновился.
                     val activeRoot = try { service.rootInActiveWindow } catch (_: Throwable) { null }
-                    if (activeRoot != null && activeRoot.packageName != selfPkg) {
+                    if (activeRoot != null && (includeSelf || activeRoot.packageName != selfPkg)) {
                         val focused = try {
                             activeRoot.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
                         } catch (_: Throwable) { null }
