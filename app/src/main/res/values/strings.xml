@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ClipCells</string>
+    <string name="app_name">Буфер обмена</string>
     <string name="overlay_permission_missing">Нет разрешения «Поверх других приложений» — включи его в настройках ClipCells</string>
     <string name="paste_a11y_label">Прямая вставка</string>
     <string name="paste_a11y_description">Вставляет скопированную ячейку прямо в поле ввода открытого приложения, в обход буфера обмена. Работает только по нажатию кнопки «Вставить», ничего не читает со экрана.</string>

@@ -120,7 +120,10 @@ internal fun CellCard(
             .then(gesture),
         shape = shape,
         colors = CardDefaults.cardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+            // Выбранная карточка — стеклянная подсветка (не заливка):
+            // фон чуть глубже + акцентная рамка, текст не инвертируется.
+            containerColor = if (selected) MaterialTheme.colorScheme.surfaceVariant
+            else MaterialTheme.colorScheme.surface,
         ),
     ) {
         Box(
@@ -135,7 +138,7 @@ internal fun CellCard(
                     val hold = holdProgress.value
                     val width = (if (selected) 2f else 1f + hold * 3f).dp.toPx()
                     val brush = if (selected) {
-                        borderBrush
+                        MaterialTheme.colorScheme.primary
                     } else {
                         borderBrush.copy(alpha = 0.35f + hold * 0.65f)
                     }
@@ -154,21 +157,21 @@ internal fun CellCard(
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "${cell.messages.size} сообщ.",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (selected) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             androidx.compose.animation.AnimatedVisibility(selected, Modifier.align(Alignment.TopEnd)) {
                 Box(
-                    Modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onPrimary),
+                    Modifier.size(22.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
+                    Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(15.dp))
                 }
             }
             if (mode == HomeMode.EDIT) {
