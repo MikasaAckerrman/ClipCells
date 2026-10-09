@@ -157,27 +157,52 @@ class PasteAccessibilityService : AccessibilityService() {
             }
         }
 
-        /** Общий поиск целевого узла: сфокусированное поле, иначе первый editable. */
+        /**
+         * Общий поиск целевого узла: сфокусированное поле, иначе первый editable.
+         * Ретраи: шторка сворачивается ~300-500мс — окно чата появляется в
+         * списке интерактивных окон не мгновенно; 3 попытки с паузой 200мс.
+         */
         private fun findEditableNode(
             service: PasteAccessibilityService,
             selfPkg: String,
         ): AccessibilityNodeInfo? {
-            val windowList = try { service.windows } catch (_: Throwable) { null } ?: return null
-            for (window in windowList.sortedByDescending { it.isActive }) {
-                val root = try { window.root } catch (_: Throwable) { null } ?: continue
-                if (root.packageName == selfPkg) continue
-                val focused = try {
-                    root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-                } catch (_: Throwable) { null }
-                if (focused != null && focused.isEditable) return focused
-                findFirstEditable(root)?.let { return it }
+            repeat(3) { attempt ->
+                try {
+                    // 1) Полный список интерактивных окон (требует
+                    // flagRetrieveInteractiveWindows в конфиге сервиса).
+                    val windowList = service.windows
+                    for (window in windowList.sortedByDescending { it.isActive }) {
+                        val root = try { window.root } catch (_: Throwable) { null } ?: continue
+                        if (root.packageName == selfPkg) continue
+                        val focused = try {
+                            root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                        } catch (_: Throwable) { null }
+                        if (focused != null && focused.isEditable) return focused
+                        findFirstEditable(root)?.let { return it }
+                    }
+                    // 2) Активное окно напрямую — когда список ещё не обновился.
+                    val activeRoot = try { service.rootInActiveWindow } catch (_: Throwable) { null }
+                    if (activeRoot != null && activeRoot.packageName != selfPkg) {
+                        val focused = try {
+                            activeRoot.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                        } catch (_: Throwable) { null }
+                        if (focused != null && focused.isEditable) return focused
+                        findFirstEditable(activeRoot)?.let { return it }
+                    }
+                } catch (_: Throwable) {
+                }
+                if (attempt < 2) {
+                    try { Thread.sleep(200) } catch (_: InterruptedException) { return null }
+                }
             }
             return null
         }
 
         /** Fallback: первый редактируемый узел окна (обход без фокуса ввода). */
         private fun findFirstEditable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-            var budget = 400
+            // Бюджет 2000: дерево чата широкое (список сообщений), поле ввода
+            // лежит глубоко — BFS должен его достичь.
+            var budget = 2_000
             val queue = ArrayDeque<AccessibilityNodeInfo>()
             queue.addLast(root)
             while (queue.isNotEmpty() && budget > 0) {
