@@ -35,9 +35,10 @@ import com.clipcells.app.data.ClipCellsDatabase
  *  - Статичное окно: НЕ плавает, НЕ перетаскивается, НЕ закрывает поле ввода —
  *    позиция вычисляется по границам сфокусированного поля (через a11y):
  *    панель встаёт НАД ним (или под, если сверху нет места).
- *  - Клавиатуру НЕ вызывает вообще: окно FLAG_NOT_FOCUSABLE и в нём нет ни
- *    одного текст-поля — IME не может появиться по нашей вине; фокус
- *    приложения под панелью не трогаем.
+ *  - Клавиатура НЕ вызывается, пока панель работает: окно фокусируемо и
+ *    содержит ТОЛЬКО отображения (ни одного редактора) — IME системы
+ *    закрывается при передаче фокуса такому окну; после закрытия панели
+ *    фокус возвращается приложению.
  *  - Тап по ячейке = текст ВСТАВЛЯЕТСЯ прямо в поле (a11y ACTION_SET_TEXT,
  *    в позицию курсора) — мимо буфера обмена и мимо истории клавиатуры.
  *    После успешной вставки панель сама закрывается; ✕ — ручное закрытие.
@@ -176,9 +177,9 @@ object OverlayPastePanel {
         private val dp = dpFactor()
         private val screen = screenPx()
 
-        /** Фиксированные размеры окна: детерминированная статичная панель. */
-        private val panelW = minOf(360 * dp, (screen.x * 0.72f).toInt())
-        private val panelH = 288 * dp
+        /** Фиксированные размеры: больше окна и начинки (ТЗ v0.16). */
+        private val panelW = minOf(420 * dp, (screen.x * 0.86f).toInt())
+        private val panelH = 336 * dp
 
         lateinit var root: PastePanelRoot
         private lateinit var feedbackView: TextView
@@ -197,10 +198,10 @@ object OverlayPastePanel {
 
         fun build() {
             root = PastePanelRoot(app).apply {
-                setPadding(12 * dp, 10 * dp, 12 * dp, 12 * dp)
+                setPadding(14 * dp, 12 * dp, 14 * dp, 14 * dp)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor(PANEL_BG))
-                    cornerRadius = 22 * dp.toFloat()
+                    cornerRadius = 24 * dp.toFloat()
                     setStroke(dp, Color.parseColor(STROKE))
                 }
             }
@@ -216,7 +217,7 @@ object OverlayPastePanel {
             }
             header.addView(TextView(app).apply {
                 text = "Вставка"
-                textSize = 14f
+                textSize = 15f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(Color.parseColor(TEXT))
                 maxLines = 1
@@ -229,11 +230,11 @@ object OverlayPastePanel {
             })
             header.addView(iconButton("✕", "Закрыть") { onClose() })
             column.addView(header, LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 34 * dp
+                ViewGroup.LayoutParams.MATCH_PARENT, 38 * dp
             ))
 
             feedbackView = TextView(app).apply {
-                textSize = 10f
+                textSize = 11f
                 setTextColor(Color.parseColor(TEXT_FAINT))
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
@@ -247,8 +248,8 @@ object OverlayPastePanel {
             grid = GridView(app).apply {
                 numColumns = 3
                 stretchMode = GridView.STRETCH_COLUMN_WIDTH
-                verticalSpacing = 8 * dp
-                horizontalSpacing = 8 * dp
+                verticalSpacing = 10 * dp
+                horizontalSpacing = 10 * dp
                 adapter = cellsAdapter
                 layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
@@ -280,33 +281,25 @@ object OverlayPastePanel {
                 panelW,
                 panelH,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                // НЕ фокусируемое окно: клавиатура не вызывается ВООБЩЕ,
-                // фокус приложения и поля ввода под панелью не трогаем.
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                // Фокусируемое окно БЕЗ редакторов: система прячет IME, пока
+                // панель работает (клавиатура не вызывается). Тачи вокруг
+                // панели по-прежнему уходят в приложение под ней.
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 android.graphics.PixelFormat.TRANSLUCENT,
             ).apply {
-                gravity = Gravity.TOP or Gravity.START
-                // Статичное размещение: не поверх поля ввода (границы — из a11y).
-                x = ((screen.x - panelW) / 2).coerceAtLeast(0)
-                y = placeY(field, panelH, screen.y, 12 * dp)
+                // ОКНО ВСЕГДА В ФИКСИРОВАННОМ ПОЛОЖЕНИИ (ТЗ v0.16): верх-центр,
+                // не вычисляется по полю, не двигается никогда.
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                y = (screen.y * 0.06f).toInt()
+                // Панель фокусируема и НЕ содержит редакторов: IME-сервис
+                // системы прячет клавиатуру на время работы панели —
+                // клавиатура не вызывается, пока окно открыто.
+                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
                 if (Build.VERSION.SDK_INT >= 28) {
                     layoutInDisplayCutoutMode =
                         WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
                 }
             }
-
-        /** Куда встать: над полем (стандарт), под ним, или верх экрана. */
-        private fun placeY(field: Rect?, panelH: Int, screenH: Int, margin: Int): Int {
-            val f = field ?: return (screenH * 0.10f).toInt()
-            val above = f.top - panelH - margin
-            val below = f.bottom + margin
-            return when {
-                above >= 0 -> above                                   // над полем
-                below + panelH <= screenH -> below                     // под полем
-                else -> (f.top * 0.18f).toInt().coerceIn(0, above.coerceAtLeast(0)) // тесно: прижаться вверх, поле не трогать
-            }
-        }
 
         // --------------------------------------------------------- вставка
 
@@ -388,17 +381,13 @@ object OverlayPastePanel {
             }
             val latch = java.util.concurrent.CountDownLatch(1)
             root.post {
-                // Слушатель ДО перевода окна в фокусируемое — иначе событие теряем.
+                // Окно панели УЖЕ фокусируемо (ТЗ v0.16: IME спрятан) — буфер
+                // пишем легально; ждём окно-фокус для надёжности.
                 val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
                     if (hasFocus) latch.countDown()
                 }
                 root.viewTreeObserver.addOnWindowFocusChangeListener(listener)
-                lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
-                try {
-                    wm.updateViewLayout(root, lp)
-                } catch (_: Exception) {
-                    latch.countDown()
-                }
+                if (root.hasWindowFocus()) latch.countDown()
                 Thread {
                     try { latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: InterruptedException) {}
                     try {
@@ -414,11 +403,8 @@ object OverlayPastePanel {
                             root.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
                         } catch (_: Exception) {
                         }
-                        // Окно снова НЕ фокусируемое: клавиатуру не держим, фокус
-                        // возвращается приложению под панелью.
-                        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         try {
-                            wm.updateViewLayout(root, lp)
+                            root.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
                         } catch (_: Exception) {
                         }
                         pasting = false
@@ -494,13 +480,13 @@ object OverlayPastePanel {
                     android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
                     GradientDrawable().apply {
                         setColor(Color.parseColor(CELL_BG))
-                        cornerRadius = 14 * dp.toFloat()
+                        cornerRadius = 16 * dp.toFloat()
                         setStroke(dp, Color.parseColor(CELL_STROKE))
                     },
                     null,
                 )
                 nameView = TextView(context).apply {
-                    textSize = 11f
+                    textSize = 12f
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     setTextColor(Color.parseColor(TEXT))
                     gravity = Gravity.CENTER
@@ -512,10 +498,10 @@ object OverlayPastePanel {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
                     gravity = Gravity.CENTER
-                    setMargins(6 * dp, 4 * dp, 6 * dp, 4 * dp)
+                    setMargins(8 * dp, 5 * dp, 8 * dp, 5 * dp)
                 })
                 countView = TextView(context).apply {
-                    textSize = 9f
+                    textSize = 10f
                     setTextColor(Color.parseColor(TEXT_DIM))
                     gravity = Gravity.CENTER
                 }
@@ -548,7 +534,7 @@ object OverlayPastePanel {
                 val cell = cells[position]
                 val card = (convertView as? CellCardView) ?: CellCardView(parent.context).apply {
                     layoutParams = AbsListView.LayoutParams(
-                        AbsListView.LayoutParams.MATCH_PARENT, 56 * dp
+                        AbsListView.LayoutParams.MATCH_PARENT, 68 * dp
                     )
                 }
                 card.bind(cell)
@@ -562,13 +548,13 @@ object OverlayPastePanel {
             init {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(10 * dp, 7 * dp, 10 * dp, 7 * dp)
+                setPadding(12 * dp, 9 * dp, 12 * dp, 9 * dp)
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor(CELL_BG))
-                    cornerRadius = 10 * dp.toFloat()
+                    cornerRadius = 12 * dp.toFloat()
                 }
                 textView = TextView(context).apply {
-                    textSize = 11f
+                    textSize = 12f
                     setTextColor(Color.parseColor(TEXT_SOFT))
                     maxLines = 2
                     ellipsize = TextUtils.TruncateAt.END
@@ -624,7 +610,7 @@ object OverlayPastePanel {
                     },
                     null,
                 )
-                layoutParams = LinearLayout.LayoutParams(32 * dp, 32 * dp)
+                layoutParams = LinearLayout.LayoutParams(36 * dp, 36 * dp)
             }
 
         private fun screenPx(): Point {

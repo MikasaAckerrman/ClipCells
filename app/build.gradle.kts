@@ -19,8 +19,8 @@ android {
         applicationId = "com.clipcells.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "0.15.3"
+        versionCode = 31
+        versionName = "0.16.0"
     }
 
     signingConfigs {

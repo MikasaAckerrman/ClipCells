@@ -197,20 +197,32 @@ class PasteAccessibilityService : AccessibilityService() {
             }
         }
 
-        /** SET_TEXT с учётом позиции КУРСОРА (не заменяет весь текст поля). */
+        /**
+         * SET_TEXT с учётом позиции КУРСОРА (не заменяет весь текст поля).
+         * Панель фокусируема (IME спрятан) — поле могло потерять фокус и
+         * границы выделения неизвестны (-1): тогда текст ДОПИСЫВАЕТСЯ В КОНЕЦ,
+         * а не в начало (гарантия: не вклинивается перед введённым).
+         */
         private fun setWithCursor(node: AccessibilityNodeInfo, text: String): Boolean {
             val current = node.text
             val args = Bundle()
             val payload = if (current.isNullOrEmpty()) {
                 text
             } else {
-                val start = node.textSelectionStart.coerceIn(0, current.length)
-                val end = node.textSelectionEnd.coerceIn(start, current.length)
-                // Выделение есть — заменяем его; курсор — вставляем в него.
-                buildString {
-                    append(current.subSequence(0, start))
-                    append(text)
-                    append(current.subSequence(end, current.length))
+                val rawStart = node.textSelectionStart
+                val rawEnd = node.textSelectionEnd
+                val selectionKnown = rawStart in 0..current.length &&
+                    rawEnd in rawStart..current.length
+                if (!selectionKnown) {
+                    // Курсор неизвестен — дописать в конец.
+                    current.toString() + text
+                } else {
+                    // Выделение есть — заменяем его; курсор — вставляем в него.
+                    buildString {
+                        append(current.subSequence(0, rawStart))
+                        append(text)
+                        append(current.subSequence(rawEnd, current.length))
+                    }
                 }
             }
             args.putCharSequence(
