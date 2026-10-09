@@ -22,9 +22,11 @@ class PasteTileService : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
-        // Плитка активна всегда — панель доступна одним тапом из шторки.
+        // Плитка ВСЕГДА в приглушённом состоянии (STATE_INACTIVE): белый
+        // «активный» вид плитки не нужен — доступность в один тап не зависит
+        // от подсветки, а спокойная плитка не горит в шторке.
         qsTile?.let {
-            it.state = Tile.STATE_ACTIVE
+            it.state = Tile.STATE_INACTIVE
             it.updateTile()
         }
     }
