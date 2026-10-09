@@ -18,6 +18,7 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.view.animation.AccelerateInterpolator
@@ -29,28 +30,36 @@ import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.LinearLayout
 import android.widget.ListView
+import android.widget.ScrollView
 import android.widget.TextView
+import com.clipcells.app.R
 import com.clipcells.app.CLIP_SAFE_CHARS
 import com.clipcells.app.data.CellWithMessages
 import com.clipcells.app.data.ClipCellsDatabase
 import com.clipcells.app.data.MessageEntity
+import kotlin.math.abs
 
 /**
- * Стеклянная панель быстрой вставки v0.18 (ТЗ пользователя):
+ * Стеклянная панель быстрой вставки v0.20 (ТЗ пользователя):
  *
  *  - ВСТАВКА, не копирование: буфер обмена не трогаем вообще.
- *  - Экран 1 — ячейки («Minis ×5»); тап → Экран 2 — сообщения ПЛИТКАМИ:
- *    4 квадратные ячейки в ряд, скролл по вертикали.
- *  - Тап по плитке → мгновенная вставка текста в поле (a11y, позиция
- *    курсора) → панель закрывается. Долгое нажатие → режим выбора
- *    нескольких (порядок = порядок тапов, бейдж-цифра), тап переключает,
- *    «Вставить N» в правом нижнем углу вставляет все одним куском.
- *  - Оконный движок как у Copy as File: один активный аниматор окна
- *    (вход ОТМЕНЯЕТСЯ перед выходом — источник «пульсации» при закрытии),
- *    страховочный removeView через 230мс, гвард одного закрытия. Окно
- *    строго статичное: не плавает, не драгается.
- *  - Стекло: многослойный статичный фон (без runtime-blur — ноль GPU
- *    в простое); плитки ПЛОТНЫЕ (не сливаются с фоном).
+ *  - Экран 1 — ячейки («Minis ×5»); тап → Экран 2 — сообщения плитками 4 в ряд.
+ *  - Тап по плитке → мгновенная вставка текста (a11y, позиция курсора) →
+ *    панель закрывается.
+ *  - Долгое нажатие на плитку → ПРОСМОТР ПОЛНОГО ТЕКСТА: отдельная
+ *    «карточка-вьюер» с анимацией, скроллом текста и кнопкой-стрелкой
+ *    выхода; остальные плитки в это время скрыты. Внутри вьюера —
+ *    «Выбрать» для мультивыбора (порядок = порядок тапов, бейдж 1..N),
+ *    «Вставить N» в правом нижнем углу.
+ *  - АНТИ-МЕРЦАНИЕ (окончательное): окно WindowManager НЕ трогается вовсе —
+ *    ни layerType, ни alpha корня, ни масштаб окна (любая манипуляция
+ *    поверхностью overlay-окна на этом ROM даёт вспышку кадра). Всё, что
+ *    видно, лежит на ОДНОЙ карточке-контенте; закрытие = фейд карточки
+ *    (view-проперти, композитор), removeView уже на полностью прозрачном
+ *    окне. Один аниматор на окно, страховка 600мс, задержка 120мс после
+ *    binder-нагрузки вставки.
+ *  - Кнопки ✕ и стрелка — один размер (34dp) и один вес штриха; клик
+ *    подсвечивается белой волной (ripple 40% белого, круг в границах кнопки).
  */
 object OverlayPastePanel {
 
@@ -59,7 +68,7 @@ object OverlayPastePanel {
     @Volatile private var liveUi: PanelUi? = null
     @Volatile private var dismissing = false
 
-    /** Единственный активный аниматор окна (движок Copy as File). */
+    /** Единственный активный аниматор окна. */
     @Volatile private var windowAnim: AnimatorSet? = null
 
     fun isShowing(): Boolean = liveRoot != null
@@ -85,15 +94,12 @@ object OverlayPastePanel {
         if (dismissing) return
         dismissing = true
         val wm = liveWm ?: return
-        val content = root.getChildAt(0)
-        if (animate && content != null) {
-            exit(root, content, delayMs) { removeWindow(wm, root) }
-            // Движок Copy as File: таймер ГОРАЗДО позже конца анимации (600мс) —
-            // он существует только для зависшего аниматора, НЕ как гильотина
-            // посреди анимации (короткий таймер = рывок/мигание).
+        val card = root.getChildAt(0) ?: return removeWindow(wm, root)
+        if (animate) {
+            exit(card, delayMs) { removeWindow(wm, root) }
             root.postDelayed(
                 { if (liveRoot === root) removeWindow(wm, root) },
-                delayMs + 600
+                delayMs + 600,
             )
         } else {
             removeWindow(wm, root)
@@ -111,7 +117,7 @@ object OverlayPastePanel {
             liveWm = wm
             liveUi = ui
             dismissing = false
-            enter(ui.root, ui.root.getChildAt(0))
+            enter(ui.card)
             android.util.Log.i(TAG, "paste panel shown cells=${cells.size}")
         } catch (e: Exception) {
             android.util.Log.w(TAG, "paste panel addView failed", e)
@@ -121,8 +127,6 @@ object OverlayPastePanel {
     private fun removeWindow(wm: WindowManager, root: View) {
         windowAnim?.cancel()
         windowAnim = null
-        // Вернуть обычный режим отрисовки (hardware-слой был только на анимации).
-        root.setLayerType(View.LAYER_TYPE_NONE, null)
         liveRoot = null
         liveWm = null
         liveUi = null
@@ -135,26 +139,21 @@ object OverlayPastePanel {
     }
 
     // ------------------------------------------------------------- FX
-    // Движок Copy as File: один аниматор; hide() сперва гасит вход —
-    // вход и выход никогда не спорят за окно (= нет «пульсации»).
+    // ФЕЙДИТСЯ ТОЛЬКО КАРТОЧКА (view-проперти): окно-поверхность не
+    // перестраивается — вспышкам взяться неоткуда.
 
-    /**
-     * Вход: окно (стекло) проявляется, КОНТЕНТ внутри масштабируется — окно
-     * само не скейлится (масштаб overlay-корня = дорогая перерисовка окна
-     * каждый кадр — источник мерцания; Copy as File скейлит карточку внутри).
-     */
-    private fun enter(root: View, content: View) {
+    private fun enter(card: View) {
         windowAnim?.cancel()
-        root.alpha = 0f
-        content.scaleX = 0.94f
-        content.scaleY = 0.94f
+        card.alpha = 0f
+        card.scaleX = 0.94f
+        card.scaleY = 0.94f
         AnimatorSet().apply {
             playTogether(
-                ObjectAnimator.ofFloat(root, View.ALPHA, 0f, 1f),
-                ObjectAnimator.ofFloat(content, View.SCALE_X, 0.94f, 1f),
-                ObjectAnimator.ofFloat(content, View.SCALE_Y, 0.94f, 1f),
+                ObjectAnimator.ofFloat(card, View.ALPHA, 0f, 1f),
+                ObjectAnimator.ofFloat(card, View.SCALE_X, 0.94f, 1f),
+                ObjectAnimator.ofFloat(card, View.SCALE_Y, 0.94f, 1f),
             )
-            duration = 140
+            duration = 150
             interpolator = DecelerateInterpolator(1.3f)
             windowAnim = this
             addListener(object : android.animation.Animator.AnimatorListener {
@@ -167,25 +166,14 @@ object OverlayPastePanel {
         }
     }
 
-    /**
-     * Выход — движок Copy as File (анти-дрожь):
-     *  1. activeAnim.cancel() — ещё играющий вход не спорит с выходом.
-     *  2. HARDWARE-слой на время фейда: окно рендерится в текстуру ОДИН раз,
-     *     дальше затухание — чистая работа композитора (иммунно к лагам
-     *     главного потока; масштабирование корня окна мы не делаем вовсе).
-     *  3. delayMs — путь сразу после binder-нагрузки (автозакрытие после
-     *     вставки) отдаёт ~120мс на завершение системных вызовов ДО старта
-     *     анимации, чтобы её первые кадры не подвисали.
-     */
-    private fun exit(root: View, content: View, delayMs: Long, end: () -> Unit) {
-        windowAnim?.cancel() // вход (если ещё играл) НЕ спорит с выходом
-        root.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+    private fun exit(card: View, delayMs: Long, end: () -> Unit) {
+        windowAnim?.cancel() // играющий вход не спорит с выходом
         AnimatorSet().apply {
             startDelay = delayMs
             playTogether(
-                ObjectAnimator.ofFloat(root, View.ALPHA, root.alpha, 0f),
-                ObjectAnimator.ofFloat(content, View.SCALE_X, content.scaleX, 0.96f),
-                ObjectAnimator.ofFloat(content, View.SCALE_Y, content.scaleY, 0.96f),
+                ObjectAnimator.ofFloat(card, View.ALPHA, card.alpha, 0f),
+                ObjectAnimator.ofFloat(card, View.SCALE_X, card.scaleX, 0.96f),
+                ObjectAnimator.ofFloat(card, View.SCALE_Y, card.scaleY, 0.96f),
             )
             duration = 160
             interpolator = AccelerateInterpolator(1.15f)
@@ -219,6 +207,7 @@ object OverlayPastePanel {
         private val tileSide = (panelW - 32 * dp - 3 * (8 * dp)) / 4
 
         lateinit var root: PastePanelRoot
+        lateinit var card: FrameLayout
         private lateinit var titleView: TextView
         private lateinit var cellsList: ListView
         private lateinit var cellsAdapter: CellsAdapter
@@ -227,34 +216,45 @@ object OverlayPastePanel {
         private lateinit var sendBtn: TextView
         private var pasting = false
 
-        /** Открытая ячейка (экран сообщений), null = экран ячеек. */
+        /** Открытая ячейка (экран сообщений). */
         private var openCell: CellWithMessages? = null
 
-        /**
-         * Мульти-выбор: ПОСЛЕДОВАТЕЛЬНОСТЬ тапов (id в порядке выбора).
-         * Бейдж = позиция+1 — числа ВСЕГДА 1..N без дыр и роста: снял выбор —
-         * хвост автоматически сдвигается (раньше счётчик рос бесконечно и
-         * показывал «10+» на пяти плитках).
-         */
+        /** Вьюер полного текста (зажатие плитки). */
+        private var viewer: FrameLayout? = null
+        private var viewerTitle: TextView? = null
+        private var viewerText: TextView? = null
+        private var viewerSelectBtn: TextView? = null
+        private var viewerMessage: MessageEntity? = null
+
+        /** Последовательность выбранных (порядок тапов) — бейджи 1..N. */
         private val selectionSequence = ArrayList<Long>()
         private val selected = HashMap<Long, MessageEntity>()
 
         fun build() {
-            root = PastePanelRoot(app).apply {
+            // Root — прозрачный контейнер: ОКНО не анимируем вообще.
+            root = PastePanelRoot(app)
+            card = FrameLayout(app).apply {
                 setPadding(16 * dp, 14 * dp, 16 * dp, 16 * dp)
                 background = glassBackground()
             }
-
-            val column = LinearLayout(app).apply { orientation = LinearLayout.VERTICAL }
-            root.addView(column, FrameLayout.LayoutParams(
+            root.addView(card, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             ))
 
-            // --- Шапка: заголовок (имя ячейки) + ✕
+            val column = LinearLayout(app).apply { orientation = LinearLayout.VERTICAL }
+            card.addView(column, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+
+            // --- Шапка: [стрелка] заголовок ✕
             val header = LinearLayout(app).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
+            header.addView(iconButton(R.drawable.ic_back, "Назад к ячейкам") { backToCells() }.apply {
+                visibility = View.GONE
+                backBtn = this
+            })
             titleView = TextView(app).apply {
                 text = "Вставка"
                 textSize = 16f
@@ -266,16 +266,12 @@ object OverlayPastePanel {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             header.addView(titleView)
-            header.addView(backIconButton { backToCells() }.apply {
-                visibility = View.GONE
-                backBtn = this
-            })
-            header.addView(iconButton("✕", "Закрыть") { onClose() })
+            header.addView(iconButton(R.drawable.ic_close, "Закрыть") { onClose() })
             column.addView(header, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 42 * dp
             ))
 
-            // --- Экран 1: список ячеек
+            // --- Экран 1: ячейки
             cellsAdapter = CellsAdapter()
             cellsList = ListView(app).apply {
                 divider = null
@@ -289,7 +285,7 @@ object OverlayPastePanel {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             ))
 
-            // --- Экран 2: сообщения — квадратные плитки, 4 в ряд
+            // --- Экран 2: сообщения — квадратные плитки 4 в ряд
             gridAdapter = MessageTilesAdapter()
             grid = GridView(app).apply {
                 numColumns = 4
@@ -307,7 +303,7 @@ object OverlayPastePanel {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             ))
 
-            // --- «Вставить N» — правый нижний угол (только в режиме выбора)
+            // --- «Вставить N» — правый нижний угол
             sendBtn = TextView(app).apply {
                 text = "Вставить"
                 textSize = 14f
@@ -343,13 +339,10 @@ object OverlayPastePanel {
                 panelW,
                 panelH,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                // НЕфокусируемое: поле сохраняет фокус (курсор мигает),
-                // вставка точно в курсор, клавиатуру панель не вызывает.
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 android.graphics.PixelFormat.TRANSLUCENT,
             ).apply {
-                // Окно СТРОГО статично: фиксированная позиция, не плавает.
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 y = (screen.y * 0.055f).toInt()
                 softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
@@ -375,6 +368,7 @@ object OverlayPastePanel {
         }
 
         private fun backToCells() {
+            closeViewer()
             if (openCell == null) return
             openCell = null
             selected.clear()
@@ -388,11 +382,129 @@ object OverlayPastePanel {
             cellsList.smoothScrollToPosition(0)
         }
 
-        // ---------------------------------------------------- вставка
+        // ---------------------------------------------------- вьюер
+
+        /** Зажатие плитки: полный текст с анимацией, скроллом, «Выбрать». */
+        private fun openViewer(message: MessageEntity) {
+            if (viewer != null) return
+            closeViewer()
+            viewerMessage = message
+
+            val v = FrameLayout(app).apply {
+                background = glassBackground()
+                setPadding(16 * dp, 14 * dp, 16 * dp, 16 * dp)
+                alpha = 0f
+                scaleX = 0.92f
+                scaleY = 0.92f
+            }
+            val col = LinearLayout(app).apply { orientation = LinearLayout.VERTICAL }
+            v.addView(col, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+
+            val header = LinearLayout(app).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            header.addView(iconButton(R.drawable.ic_back, "Назад к плиткам") { closeViewer() })
+            viewerTitle = TextView(app).apply {
+                textSize = 14f
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTextColor(Color.parseColor(TEXT))
+                maxLines = 1
+                ellipsize = TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            header.addView(viewerTitle)
+            viewerSelectBtn = TextView(app).apply {
+                textSize = 13f
+                setTextColor(Color.parseColor(ACCENT))
+                setOnClickListener {
+                    val msg = viewerMessage ?: return@setOnClickListener
+                    if (selected.containsKey(msg.id)) deselect(msg) else select(msg)
+                    refreshViewerSelectState()
+                }
+                background = RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
+                    GradientDrawable().apply {
+                        setColor(Color.parseColor("#00FFFFFF"))
+                        cornerRadius = 14 * dp.toFloat()
+                        setStroke(dp, Color.parseColor(STROKE_SOFT))
+                    },
+                    null,
+                )
+                setPadding(12 * dp, 6 * dp, 12 * dp, 6 * dp)
+            }
+            header.addView(viewerSelectBtn, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            col.addView(header, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 42 * dp
+            ))
+
+            val scroller = ScrollView(app).apply {
+                isVerticalScrollBarEnabled = true
+                overScrollMode = View.OVER_SCROLL_NEVER
+            }
+            viewerText = TextView(app).apply {
+                textSize = 13f
+                setTextColor(Color.parseColor(TEXT_SOFT))
+                setLineSpacing(2 * dp.toFloat(), 1.05f)
+                setPadding(4 * dp, 6 * dp, 4 * dp, 6 * dp)
+            }
+            scroller.addView(viewerText, ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ))
+            col.addView(scroller, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            ))
+
+            card.addView(v, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+            viewer = v
+
+            val idx = openCell?.orderedMessages?.indexOfFirst { it.id == message.id } ?: -1
+            viewerTitle?.text = if (idx >= 0) "Сообщение ${idx + 1}" else "Сообщение"
+            viewerText?.text = message.text.trim()
+            refreshViewerSelectState()
+
+            v.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170)
+                .setInterpolator(DecelerateInterpolator(1.25f)).start()
+            root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        }
+
+        private fun closeViewer() {
+            val v = viewer ?: return
+            viewer = null
+            viewerMessage = null
+            viewerTitle = null
+            viewerText = null
+            viewerSelectBtn = null
+            v.animate().alpha(0f).scaleX(0.94f).scaleY(0.94f).setDuration(130)
+                .setInterpolator(AccelerateInterpolator(1.1f))
+                .withEndAction {
+                    (v.parent as? ViewGroup)?.removeView(v)
+                }.start()
+        }
+
+        private fun refreshViewerSelectState() {
+            val msg = viewerMessage
+            val btn = viewerSelectBtn
+            if (msg != null && btn != null) {
+                if (selected.containsKey(msg.id)) {
+                    btn.text = "Выбрано ${selectionSequence.indexOf(msg.id) + 1}"
+                } else {
+                    btn.text = "Выбрать"
+                }
+            }
+        }
+
+        // ---------------------------------------------------- выбор
 
         private fun onTileTap(message: MessageEntity) {
+            if (viewer != null) return
             if (selectionSequence.isNotEmpty()) {
-                // Режим выбора: тап = переключить.
                 if (selected.containsKey(message.id)) deselect(message) else select(message)
                 return
             }
@@ -400,12 +512,8 @@ object OverlayPastePanel {
         }
 
         private fun onTileLongTap(message: MessageEntity) {
-            if (selected.containsKey(message.id)) {
-                deselect(message)
-            } else {
-                select(message)
-            }
-            root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            if (viewer != null) return
+            openViewer(message)
         }
 
         private fun select(message: MessageEntity) {
@@ -447,6 +555,8 @@ object OverlayPastePanel {
             paste(ordered.map { it.text }, "выбрано ${ordered.size}")
         }
 
+        // ---------------------------------------------------- вставка
+
         private fun paste(texts: List<String>, what: String) {
             if (pasting) return
             val text = texts.joinToString("\n\n")
@@ -472,8 +582,6 @@ object OverlayPastePanel {
                 }
                 Handler(Looper.getMainLooper()).post {
                     pasting = false
-                    // delayMs: binder-последствия вставки завершаются ДО
-                    // первых кадров анимации закрытия (анти-подвисание).
                     if (result == PasteResult.Pasted) hide(animate = true, delayMs = 120)
                 }
             }.start()
@@ -481,7 +589,6 @@ object OverlayPastePanel {
 
         // ------------------------------------------------------- стекло
 
-        /** Плотное «стекло»: заливка + верхний блик + рамка, углы 28dp. */
         private fun glassBackground(): LayerDrawable {
             val fill = GradientDrawable().apply {
                 setColor(Color.parseColor(GLASS_FILL))
@@ -506,7 +613,6 @@ object OverlayPastePanel {
 
         // ---------------------------------------------------- адаптеры
 
-        /** Экран 1: строка ячейки «Minis ×5». */
         private inner class CellsAdapter : BaseAdapter() {
             override fun getCount() = cells.size
             override fun getItem(position: Int): Any = cells[position]
@@ -568,7 +674,6 @@ object OverlayPastePanel {
             }
         }
 
-        /** Экран 2: квадратные плитки сообщений (4 в ряд). */
         private inner class MessageTilesAdapter : BaseAdapter() {
             override fun getCount(): Int = openCell?.orderedMessages?.size ?: 0
             override fun getItem(position: Int): Any =
@@ -588,32 +693,28 @@ object OverlayPastePanel {
             }
         }
 
-        /** Плитка: квадрат, превью текста, бейдж порядка при выборе. */
+        /**
+         * Плитка: БЕЗ внутренних ScrollView (они поглощали тачи — плитки
+         * «не нажимались»). Тап = вставка, зажатие = вьюер полного текста.
+         */
         private inner class MessageTileView(context: Context) : FrameLayout(context) {
-            private val scroller: android.widget.ScrollView
             private val textView: TextView
             private val badgeView: TextView
             private var boundId: Long = -1L
             private var wasSelected = false
 
             init {
-                // СКРОЛЛ ТЕКСТА внутри плитки: полный текст читается прокруткой
-                // (тап без движения = клик-вставка, движение = скролл текста).
-                scroller = android.widget.ScrollView(context).apply {
-                    isFillViewport = false
-                    isVerticalScrollBarEnabled = false
-                    overScrollMode = View.OVER_SCROLL_NEVER
-                }
+                isClickable = true
+                isLongClickable = true
                 textView = TextView(context).apply {
                     textSize = 11f
                     setTextColor(Color.parseColor(TEXT_SOFT))
+                    maxLines = 8
+                    ellipsize = TextUtils.TruncateAt.END
                     setLineSpacing(1 * dp.toFloat(), 1.02f)
                     setPadding(10 * dp, 10 * dp, 10 * dp, 10 * dp)
                 }
-                scroller.addView(textView, ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                ))
-                addView(scroller, FrameLayout.LayoutParams(
+                addView(textView, FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
                 ))
                 badgeView = TextView(context).apply {
@@ -633,12 +734,11 @@ object OverlayPastePanel {
                 layoutParams = AbsListView.LayoutParams(
                     AbsListView.LayoutParams.MATCH_PARENT, tileSide
                 )
-                // Клик/лонг-клик на СКРОЛЛЕ (тап-без-движения = клик).
-                scroller.setOnClickListener {
+                setOnClickListener {
                     val msg = messageFromTag() ?: return@setOnClickListener
                     onTileTap(msg)
                 }
-                scroller.setOnLongClickListener {
+                setOnLongClickListener {
                     val msg = messageFromTag() ?: return@setOnLongClickListener false
                     onTileLongTap(msg)
                     true
@@ -651,10 +751,8 @@ object OverlayPastePanel {
             fun bind(message: MessageEntity) {
                 boundId = message.id
                 val isSelected = selected.containsKey(message.id)
-                // Полный текст — ScrollView покажет прокруткой (maxLines нет).
                 textView.text = message.text.trim()
                 val bg = GradientDrawable().apply {
-                    // Плотная плитка — не сливается со стеклом фона.
                     setColor(
                         if (isSelected) Color.parseColor(ITEM_BG_SELECTED)
                         else Color.parseColor(ITEM_BG)
@@ -667,10 +765,7 @@ object OverlayPastePanel {
                 )
                 if (isSelected) {
                     badgeView.visibility = View.VISIBLE
-                    // Порядковый номер = позиция в ПОСЛЕДОВАТЕЛЬНОСТИ тапов
-                    // (1..N без дыр — перенумерация автоматична при снятии).
                     badgeView.text = "${(selectionSequence.indexOf(message.id) + 1)}"
-                    // Поп — только когда состояние ИЗМЕНИЛОСЬ (не при рецикле).
                     if (!wasSelected) {
                         badgeView.scaleX = 0.6f
                         badgeView.scaleY = 0.6f
@@ -687,36 +782,17 @@ object OverlayPastePanel {
 
         // ------------------------------------------------------- утил
 
-        /** Кнопка «назад»: вектор-стрелка 44dp (крупная, читаемая). */
-        private fun backIconButton(onClick: () -> Unit): android.widget.ImageView =
+        /** Кнопка-иконка 34dp (✕ и стрелка — одинаковые): белая волна при нажатии. */
+        private fun iconButton(iconRes: Int, description: String, onClick: () -> Unit): View =
             android.widget.ImageView(app).apply {
-                setImageResource(com.clipcells.app.R.drawable.ic_back)
-                contentDescription = "Назад к ячейкам"
-                setOnClickListener { onClick() }
-                background = RippleDrawable(
-                    android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
-                    GradientDrawable().apply {
-                        setColor(Color.parseColor("#00FFFFFF"))
-                        cornerRadius = 22 * dp.toFloat()
-                    },
-                    null,
-                )
-                layoutParams = LinearLayout.LayoutParams(44 * dp, 44 * dp)
-            }
-
-        private fun iconButton(glyph: String, description: String, onClick: () -> Unit): TextView =
-            TextView(app).apply {
-                text = glyph
-                textSize = 16f
-                gravity = Gravity.CENTER
+                setImageResource(iconRes)
                 contentDescription = description
-                setTextColor(Color.parseColor(TEXT_DIM))
                 setOnClickListener { onClick() }
                 background = RippleDrawable(
-                    android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
+                    android.content.res.ColorStateList.valueOf(Color.parseColor(WAVE)),
                     GradientDrawable().apply {
                         setColor(Color.parseColor("#00FFFFFF"))
-                        cornerRadius = 18 * dp.toFloat()
+                        cornerRadius = 17 * dp.toFloat()
                     },
                     null,
                 )
@@ -743,11 +819,14 @@ object OverlayPastePanel {
             private const val GLASS_SHEEN = "#26FFFFFF"
             private const val GLASS_SHADE = "#0D000000"
             private const val GLASS_STROKE = "#40FFFFFF"
+            private const val STROKE_SOFT = "#33FFFFFF"
 
-            // Плитки/строки: ПЛОТНЫЕ, контраст к стеклу.
             private const val ITEM_BG = "#F01C1C22"
             private const val ITEM_BG_SELECTED = "#F0262B36"
             private const val RIPPLE = "#26FFFFFF"
+
+            /** Белая волна на кнопках — видимая (40% белого). */
+            private const val WAVE = "#66FFFFFF"
 
             private const val TEXT = "#FFF5F6FA"
             private const val TEXT_SOFT = "#FFE9EBF0"
@@ -759,10 +838,7 @@ object OverlayPastePanel {
         }
     }
 
-    /**
-     * Корень: BACK гасится (закрытие — только ✕ или успешная вставка),
-     * окно строго статичное.
-     */
+    /** Корень: прозрачный контейнер (окно не анимируем), BACK гасится. */
     private class PastePanelRoot(context: Context) : FrameLayout(context) {
         override fun dispatchKeyEvent(ev: KeyEvent): Boolean {
             if (ev.action == KeyEvent.ACTION_DOWN && ev.keyCode == KeyEvent.KEYCODE_BACK) {
