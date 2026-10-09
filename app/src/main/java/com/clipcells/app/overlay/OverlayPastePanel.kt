@@ -24,9 +24,10 @@ import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.AbsListView
-import android.widget.AdapterView
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
+import android.widget.GridView
+import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import com.clipcells.app.CLIP_SAFE_CHARS
@@ -35,23 +36,21 @@ import com.clipcells.app.data.ClipCellsDatabase
 import com.clipcells.app.data.MessageEntity
 
 /**
- * Стеклянная панель быстрой вставки v0.17 (ТЗ пользователя):
+ * Стеклянная панель быстрой вставки v0.18 (ТЗ пользователя):
  *
  *  - ВСТАВКА, не копирование: буфер обмена не трогаем вообще.
- *  - Тап по ячейке → СРАЗУ её список сообщений; тап по сообщению → мгновенная
- *    вставка этого текста в поле (a11y, позиция курсора) → панель закрывается.
- *  - Долгое нажатие на сообщение → РЕЖИМ ВЫБОРА: можно выбрать несколько,
- *    порядок = порядок тапов; кнопка «Вставить» в правом нижнем углу вставляет
- *    все выбранные одним куском. Повторный тап снимает выбор.
- *  - Стекло: многослойный фон (размытая подложка-затемнение + полупрозрачная
- *    заливка + верхний блик + тонкая рамка) — Material-стекло без blur-пермишена
- *    (RenderEffect-blur на overlay-окнах ненадёжен/дорог; слой 45% чёрного
- *    поверх затемняющего scrim-окна даёт «стекло» за ноль GPU).
- *  - Статичное окно: НЕфокусируемое (поле сохраняет фокус — курсор мигает,
- *    вставка ТОЧНО в курсор), НЕ драгается, фиксированная позиция.
- *  - Оптимизация: анимации только на вход/выход/выбор (View-проперти, GPU),
- *    список один строится за кадр, БД читается один раз, ноль сервисов,
- *    ноль observers; convertView-рецикл; haptic-фидбек на каждом действии.
+ *  - Экран 1 — ячейки («Minis ×5»); тап → Экран 2 — сообщения ПЛИТКАМИ:
+ *    4 квадратные ячейки в ряд, скролл по вертикали.
+ *  - Тап по плитке → мгновенная вставка текста в поле (a11y, позиция
+ *    курсора) → панель закрывается. Долгое нажатие → режим выбора
+ *    нескольких (порядок = порядок тапов, бейдж-цифра), тап переключает,
+ *    «Вставить N» в правом нижнем углу вставляет все одним куском.
+ *  - Оконный движок как у Copy as File: один активный аниматор окна
+ *    (вход ОТМЕНЯЕТСЯ перед выходом — источник «пульсации» при закрытии),
+ *    страховочный removeView через 230мс, гвард одного закрытия. Окно
+ *    строго статичное: не плавает, не драгается.
+ *  - Стекло: многослойный статичный фон (без runtime-blur — ноль GPU
+ *    в простое); плитки ПЛОТНЫЕ (не сливаются с фоном).
  */
 object OverlayPastePanel {
 
@@ -59,6 +58,9 @@ object OverlayPastePanel {
     @Volatile private var liveWm: WindowManager? = null
     @Volatile private var liveUi: PanelUi? = null
     @Volatile private var dismissing = false
+
+    /** Единственный активный аниматор окна (движок Copy as File). */
+    @Volatile private var windowAnim: AnimatorSet? = null
 
     fun isShowing(): Boolean = liveRoot != null
 
@@ -110,6 +112,8 @@ object OverlayPastePanel {
     }
 
     private fun removeWindow(wm: WindowManager, root: View) {
+        windowAnim?.cancel()
+        windowAnim = null
         liveRoot = null
         liveWm = null
         liveUi = null
@@ -122,9 +126,11 @@ object OverlayPastePanel {
     }
 
     // ------------------------------------------------------------- FX
+    // Движок Copy as File: один аниматор; hide() сперва гасит вход —
+    // вход и выход никогда не спорят за окно (= нет «пульсации»).
 
-    /** Вход: стекло «проявляется» с лёгким перелётом (140мс, GPU-проперти). */
     private fun enter(root: View) {
+        windowAnim?.cancel()
         root.alpha = 0f
         root.scaleX = 0.94f
         root.scaleY = 0.94f
@@ -136,11 +142,19 @@ object OverlayPastePanel {
             )
             duration = 140
             interpolator = DecelerateInterpolator(1.3f)
+            windowAnim = this
+            addListener(object : android.animation.Animator.AnimatorListener {
+                override fun onAnimationStart(a: android.animation.Animator) {}
+                override fun onAnimationCancel(a: android.animation.Animator) { if (windowAnim === this@apply) windowAnim = null }
+                override fun onAnimationRepeat(a: android.animation.Animator) {}
+                override fun onAnimationEnd(a: android.animation.Animator) { if (windowAnim === this@apply) windowAnim = null }
+            })
             start()
         }
     }
 
     private fun exit(root: View, end: () -> Unit) {
+        windowAnim?.cancel() // вход (если ещё играл) НЕ спорит с выходом
         AnimatorSet().apply {
             playTogether(
                 ObjectAnimator.ofFloat(root, View.ALPHA, root.alpha, 0f),
@@ -172,21 +186,25 @@ object OverlayPastePanel {
         private val dp = dpFactor()
         private val screen = screenPx()
 
-        /** Окно крупнее (ТЗ: «окно можешь увеличить»): 444×420dp. */
         private val panelW = minOf(444 * dp, (screen.x * 0.88f).toInt())
         private val panelH = 420 * dp
 
+        /** Сторона квадратной плитки сообщения: 4 в ряд. */
+        private val tileSide = (panelW - 32 * dp - 3 * (8 * dp)) / 4
+
         lateinit var root: PastePanelRoot
         private lateinit var titleView: TextView
-        private lateinit var list: ListView
-        private lateinit var listAdapter: PasteListAdapter
+        private lateinit var cellsList: ListView
+        private lateinit var cellsAdapter: CellsAdapter
+        private lateinit var grid: GridView
+        private lateinit var gridAdapter: MessageTilesAdapter
         private lateinit var sendBtn: TextView
         private var pasting = false
 
-        /** Текущий открытый экран: ячейки или сообщения выбранной ячейки. */
+        /** Открытая ячейка (экран сообщений), null = экран ячеек. */
         private var openCell: CellWithMessages? = null
 
-        /** Режим множественного выбора (после долгого тапа на сообщении). */
+        /** Мульти-выбор: id → сообщение; порядок выбора отдельной картой. */
         private val selected = LinkedHashMap<Long, MessageEntity>()
         private val selectionOrder = LinkedHashMap<Long, Int>()
         private var selectionCount = 0
@@ -198,16 +216,14 @@ object OverlayPastePanel {
                 background = glassBackground()
             }
 
-            val column = android.widget.LinearLayout(app).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-            }
+            val column = LinearLayout(app).apply { orientation = LinearLayout.VERTICAL }
             root.addView(column, FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
             ))
 
-            // --- Шапка: имя ячейки/заголовок + ✕
-            val header = android.widget.LinearLayout(app).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
+            // --- Шапка: заголовок (имя ячейки) + ✕
+            val header = LinearLayout(app).apply {
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
             titleView = TextView(app).apply {
@@ -217,31 +233,52 @@ object OverlayPastePanel {
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(Color.parseColor(TEXT))
                 maxLines = 1
-                layoutParams = android.widget.LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
-                )
+                ellipsize = TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             header.addView(titleView)
+            header.addView(iconButton("‹", "Назад к ячейкам") { backToCells() }.apply {
+                visibility = View.GONE
+                backBtn = this
+            })
             header.addView(iconButton("✕", "Закрыть") { onClose() })
-            column.addView(header, android.widget.LinearLayout.LayoutParams(
+            column.addView(header, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 42 * dp
             ))
 
-            // --- Список (ячейки ↔ сообщения — один адаптер, два экрана)
-            listAdapter = PasteListAdapter()
-            list = ListView(app).apply {
+            // --- Экран 1: список ячеек
+            cellsAdapter = CellsAdapter()
+            cellsList = ListView(app).apply {
                 divider = null
-                adapter = listAdapter
+                adapter = cellsAdapter
                 isVerticalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 cacheColorHint = Color.TRANSPARENT
                 setSelector(android.R.color.transparent)
             }
-            column.addView(list, android.widget.LinearLayout.LayoutParams(
+            column.addView(cellsList, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             ))
 
-            // --- Кнопка «Вставить» (правый нижний угол) — только в режиме выбора
+            // --- Экран 2: сообщения — квадратные плитки, 4 в ряд
+            gridAdapter = MessageTilesAdapter()
+            grid = GridView(app).apply {
+                numColumns = 4
+                stretchMode = GridView.STRETCH_COLUMN_WIDTH
+                verticalSpacing = 8 * dp
+                horizontalSpacing = 8 * dp
+                adapter = gridAdapter
+                isVerticalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                cacheColorHint = Color.TRANSPARENT
+                setSelector(android.R.color.transparent)
+                visibility = View.GONE
+            }
+            column.addView(grid, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            ))
+
+            // --- «Вставить N» — правый нижний угол (только в режиме выбора)
             sendBtn = TextView(app).apply {
                 text = "Вставить"
                 textSize = 14f
@@ -259,30 +296,31 @@ object OverlayPastePanel {
                     null,
                 )
             }
-            val bottomBar = android.widget.LinearLayout(app).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
+            val bottomBar = LinearLayout(app).apply {
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.END
                 setPadding(0, 10 * dp, 0, 0)
             }
-            bottomBar.addView(sendBtn, android.widget.LinearLayout.LayoutParams(
-                148 * dp, 44 * dp
-            ))
-            column.addView(bottomBar, android.widget.LinearLayout.LayoutParams(
+            bottomBar.addView(sendBtn, LinearLayout.LayoutParams(148 * dp, 44 * dp))
+            column.addView(bottomBar, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ))
         }
+
+        private var backBtn: TextView? = null
 
         fun windowParams(): WindowManager.LayoutParams =
             WindowManager.LayoutParams(
                 panelW,
                 panelH,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                // НЕфокусируемое: поле чата сохраняет фокус (курсор мигает,
-                // позиция вставки точная), клавиатуру панель не вызывает.
+                // НЕфокусируемое: поле сохраняет фокус (курсор мигает),
+                // вставка точно в курсор, клавиатуру панель не вызывает.
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 android.graphics.PixelFormat.TRANSLUCENT,
             ).apply {
+                // Окно СТРОГО статично: фиксированная позиция, не плавает.
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 y = (screen.y * 0.055f).toInt()
                 softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
@@ -301,32 +339,42 @@ object OverlayPastePanel {
             selectionCount = 0
             nextOrder = 1
             titleView.text = cell.cell.name
-            listAdapter.notifyDataSetChanged()
-            list.smoothScrollToPosition(0)
+            backBtn?.visibility = View.VISIBLE
+            cellsList.visibility = View.GONE
+            grid.visibility = View.VISIBLE
+            sendBtn.visibility = View.GONE
+            gridAdapter.notifyDataSetChanged()
+            grid.smoothScrollToPosition(0)
         }
 
         private fun backToCells() {
+            if (openCell == null) return
             openCell = null
             selected.clear()
             selectionOrder.clear()
             selectionCount = 0
             nextOrder = 1
             titleView.text = "Вставка"
+            backBtn?.visibility = View.GONE
+            grid.visibility = View.GONE
+            cellsList.visibility = View.VISIBLE
             sendBtn.visibility = View.GONE
-            listAdapter.notifyDataSetChanged()
-            list.smoothScrollToPosition(0)
+            cellsAdapter.notifyDataSetChanged()
+            cellsList.smoothScrollToPosition(0)
         }
 
         // ---------------------------------------------------- вставка
 
-        /** Тап по сообщению: мгновенная вставка одного текста. */
-        private fun onMessageTap(message: MessageEntity) {
-            if (selected.isNotEmpty()) return // в режиме выбора тап = выбор
+        private fun onTileTap(message: MessageEntity) {
+            if (selected.isNotEmpty()) {
+                // Режим выбора: тап = переключить.
+                if (selected.containsKey(message.id)) deselect(message) else select(message)
+                return
+            }
             paste(listOf(message.text), "сообщение")
         }
 
-        /** Долгий тап: войти в режим выбора, выбрать первое. */
-        private fun onMessageLongTap(message: MessageEntity) {
+        private fun onTileLongTap(message: MessageEntity) {
             if (selected.containsKey(message.id)) {
                 deselect(message)
             } else {
@@ -340,7 +388,7 @@ object OverlayPastePanel {
             selectionOrder[message.id] = nextOrder++
             selectionCount++
             refreshSendButton()
-            listAdapter.notifyDataSetChanged()
+            gridAdapter.notifyDataSetChanged()
         }
 
         private fun deselect(message: MessageEntity) {
@@ -348,15 +396,19 @@ object OverlayPastePanel {
             selectionOrder.remove(message.id)
             selectionCount--
             refreshSendButton()
-            listAdapter.notifyDataSetChanged()
+            gridAdapter.notifyDataSetChanged()
         }
 
         private fun refreshSendButton() {
             if (selectionCount > 0) {
+                val wasGone = sendBtn.visibility != View.VISIBLE
                 sendBtn.visibility = View.VISIBLE
                 sendBtn.text = if (selectionCount == 1) "Вставить" else "Вставить $selectionCount"
-                sendBtn.animate().scaleX(1f).scaleY(1f).setDuration(120)
-                    .setInterpolator(OvershootInterpolator(1.1f)).start()
+                if (wasGone) {
+                    sendBtn.alpha = 0f
+                    sendBtn.animate().alpha(1f).setDuration(120)
+                        .setInterpolator(OvershootInterpolator(1.1f)).start()
+                }
             } else {
                 sendBtn.animate().alpha(0f).setDuration(100).withEndAction {
                     sendBtn.visibility = View.GONE
@@ -365,18 +417,10 @@ object OverlayPastePanel {
             }
         }
 
-        /** Кнопка «Вставить»: все выбранные одним куском, порядок тапов. */
         private fun sendSelection() {
             if (selected.isEmpty() || pasting) return
             val ordered = selected.values.sortedBy { selectionOrder[it.id] ?: 0 }
             paste(ordered.map { it.text }, "выбрано ${ordered.size}")
-        }
-
-        /** Удержание ячейки на экране ячеек — тоже сразу её сообщения. */
-        private fun onCellTap(cell: CellWithMessages) {
-            if (cell.messages.isEmpty()) return
-            root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-            openMessages(cell)
         }
 
         private fun paste(texts: List<String>, what: String) {
@@ -396,30 +440,19 @@ object OverlayPastePanel {
                     val retried = if (healed) {
                         PasteAccessibilityService.pasteAtCursor(app.packageName, text)
                     } else null
-                    if (retried == PasteResult.Pasted) {
-                        Handler(Looper.getMainLooper()).post { pasting = false; hide(true) }
-                    } else {
-                        Handler(Looper.getMainLooper()).post { pasting = false }
-                    }
+                    Handler(Looper.getMainLooper()).post { pasting = false; if (retried == PasteResult.Pasted) hide(true) }
                     return@Thread
                 }
                 Handler(Looper.getMainLooper()).post {
                     pasting = false
-                    if (result == PasteResult.Pasted) {
-                        hide(animate = true) // миссия выполнена — закрыться
-                    }
+                    if (result == PasteResult.Pasted) hide(animate = true)
                 }
             }.start()
         }
 
         // ------------------------------------------------------- стекло
 
-        /**
-         * Материал: scrim-окно позади затемняет фон экрана (эффект глубины),
-         * само окно — многослойное «стекло»: плотная полупрозрачная заливка,
-         * верхний блик (имитация преломления света), тонкая светлая рамка.
-         * Ноль runtime-blur — статичные слои, ноль GPU-нагрузки в простое.
-         */
+        /** Плотное «стекло»: заливка + верхний блик + рамка, углы 28dp. */
         private fun glassBackground(): LayerDrawable {
             val fill = GradientDrawable().apply {
                 setColor(Color.parseColor(GLASS_FILL))
@@ -439,167 +472,177 @@ object OverlayPastePanel {
                 cornerRadius = 28 * dp.toFloat()
                 setStroke(dp, Color.parseColor(GLASS_STROKE))
             }
-            return LayerDrawable(arrayOf(fill, sheen, stroke)).apply {
-                setLayerInset(1, 0, 0, 0, 0)
-                setLayerInset(2, 0, 0, 0, 0)
-            }
+            return LayerDrawable(arrayOf(fill, sheen, stroke))
         }
 
-        // ---------------------------------------------------- адаптер
+        // ---------------------------------------------------- адаптеры
 
-        /**
-         * Один адаптер, два экрана: [cells] или сообщения [openCell].
-         * Тап-жест: короткий = действие, ≥350мс без движения = множественный
-         * выбор (или открытие). Ручной тайминг — системный long-click
-         * конфликтует со скроллом списка.
-         */
-        private inner class PasteListAdapter : BaseAdapter() {
-            override fun getCount(): Int =
-                openCell?.let { it.orderedMessages.size } ?: cells.size
-
-            override fun getItem(position: Int): Any =
-                openCell?.let { it.orderedMessages[position] } ?: cells[position]
-
-            override fun getItemId(position: Int): Long =
-                openCell?.let { it.orderedMessages[position].id } ?: cells[position].cell.id
+        /** Экран 1: строка ячейки «Minis ×5». */
+        private inner class CellsAdapter : BaseAdapter() {
+            override fun getCount() = cells.size
+            override fun getItem(position: Int): Any = cells[position]
+            override fun getItemId(position: Int): Long = cells[position].cell.id
 
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val cell = openCell
-                if (cell != null) {
-                    val message = cell.orderedMessages[position]
-                    val row = (convertView as? MessageRowView) ?: MessageRowView(parent.context)
-                    row.bind(message)
-                    return row
-                }
-                val item = cells[position]
-                val card = (convertView as? CellCardView) ?: CellCardView(parent.context)
-                card.bind(item)
-                return card
+                val cell = cells[position]
+                val row = (convertView as? CellRowView) ?: CellRowView(parent.context)
+                row.bind(cell)
+                return row
             }
         }
 
-        /** Карточка ячейки (первый экран): имя + счётчик, тап = список. */
-        private inner class CellCardView(context: Context) : android.widget.LinearLayout(context) {
-            private val nameView: TextView
-            private val countView: TextView
+        private inner class CellRowView(context: Context) : LinearLayout(context) {
+            private val titleView: TextView
+            private val counterView: TextView
 
             init {
-                orientation = android.widget.LinearLayout.VERTICAL
+                orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(16 * dp, 12 * dp, 16 * dp, 12 * dp)
                 isClickable = true
-                isLongClickable = true
                 background = RippleDrawable(
                     android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
                     GradientDrawable().apply {
                         setColor(Color.parseColor(ITEM_BG))
-                        cornerRadius = 20 * dp.toFloat()
+                        cornerRadius = 18 * dp.toFloat()
                     },
                     null,
                 )
-                nameView = TextView(context).apply {
+                titleView = TextView(context).apply {
                     textSize = 14f
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                     setTextColor(Color.parseColor(TEXT))
                     maxLines = 1
                     ellipsize = TextUtils.TruncateAt.END
-                    layoutParams = android.widget.LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
                 }
-                addView(nameView)
-                countView = TextView(context).apply {
-                    textSize = 11f
+                addView(titleView, LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                ))
+                counterView = TextView(context).apply {
+                    textSize = 13f
                     setTextColor(Color.parseColor(TEXT_DIM))
-                    maxLines = 1
-                    layoutParams = android.widget.LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                    )
                 }
-                addView(countView)
+                addView(counterView, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply { leftMargin = 8 * dp })
             }
 
             fun bind(cell: CellWithMessages) {
-                nameView.text = cell.cell.name
-                countView.text = "· ${cell.messages.size}"
-                contentDescription = "Ячейка ${cell.cell.name}"
-                setOnClickListener { onCellTap(cell) }
-                setOnLongClickListener { onCellTap(cell); true }
+                titleView.text = cell.cell.name
+                counterView.text = "×${cell.messages.size}"
+                contentDescription = "Ячейка ${cell.cell.name}, ${cell.messages.size} сообщений"
+                setOnClickListener {
+                    if (cell.messages.isEmpty()) return@setOnClickListener
+                    root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+                    openMessages(cell)
+                }
             }
         }
 
-        /** Строка сообщения (второй экран): текст, чекбокс выбора, тап = вставка. */
-        private inner class MessageRowView(context: Context) : android.widget.LinearLayout(context) {
+        /** Экран 2: квадратные плитки сообщений (4 в ряд). */
+        private inner class MessageTilesAdapter : BaseAdapter() {
+            override fun getCount(): Int = openCell?.orderedMessages?.size ?: 0
+            override fun getItem(position: Int): Any =
+                openCell?.orderedMessages?.getOrNull(position) ?: Unit
+
+            override fun getItemId(position: Int): Long =
+                openCell?.orderedMessages?.getOrNull(position)?.id ?: 0L
+
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val cell = openCell ?: return View(parent.context)
+                val messages = cell.orderedMessages
+                if (position !in messages.indices) return View(parent.context)
+                val message = messages[position]
+                val tile = (convertView as? MessageTileView) ?: MessageTileView(parent.context)
+                tile.bind(message)
+                return tile
+            }
+        }
+
+        /** Плитка: квадрат, превью текста, бейдж порядка при выборе. */
+        private inner class MessageTileView(context: Context) : FrameLayout(context) {
             private val textView: TextView
-            private val checkView: TextView
-            private var boundMessage: MessageEntity? = null
-            private var checkRunnable: Runnable? = null
+            private val badgeView: TextView
+            private var boundId: Long = -1L
+            private var wasSelected = false
 
             init {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(14 * dp, 11 * dp, 14 * dp, 11 * dp)
                 isClickable = true
                 isLongClickable = true
-                background = RippleDrawable(
-                    android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
-                    GradientDrawable().apply {
-                        setColor(Color.parseColor(ITEM_BG))
-                        cornerRadius = 16 * dp.toFloat()
-                    },
-                    null,
-                )
                 textView = TextView(context).apply {
-                    textSize = 13f
+                    textSize = 11f
                     setTextColor(Color.parseColor(TEXT_SOFT))
-                    maxLines = 2
-                    ellipsize = TextUtils.TruncateAt.MIDDLE
-                    setLineSpacing(1 * dp.toFloat(), 1.05f)
+                    maxLines = 7
+                    ellipsize = TextUtils.TruncateAt.END
+                    setLineSpacing(1 * dp.toFloat(), 1.02f)
+                    setPadding(10 * dp, 10 * dp, 10 * dp, 10 * dp)
+                    gravity = Gravity.TOP or Gravity.START
                 }
-                addView(textView, android.widget.LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                addView(textView, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
                 ))
-                checkView = TextView(context).apply {
+                badgeView = TextView(context).apply {
                     textSize = 12f
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                    setTextColor(Color.parseColor(ACCENT))
-                    visibility = View.GONE
+                    setTextColor(Color.parseColor(BTN_TEXT))
                     gravity = Gravity.CENTER
-                    layoutParams = android.widget.LinearLayout.LayoutParams(
-                        26 * dp, 26 * dp
-                    )
+                    visibility = View.GONE
                 }
-                addView(checkView, android.widget.LinearLayout.LayoutParams(
-                    26 * dp, 26 * dp
-                ).apply { leftMargin = 10 * dp })
-            }
-
-            fun bind(message: MessageEntity) {
-                val isSelected = selected.containsKey(message.id)
-                // Хаптик на выбор, анимация галочки/фона на GPU
-                if (isSelected) {
-                    checkView.visibility = View.VISIBLE
-                    val order = selectionOrder[message.id] ?: 0
-                    checkView.text = "$order"
-                    checkView.scaleX = 0.6f; checkView.scaleY = 0.6f
-                    checkView.animate().scaleX(1f).scaleY(1f).setDuration(150)
-                        .setInterpolator(OvershootInterpolator(1.3f)).start()
-                } else {
-                    checkView.visibility = View.GONE
-                }
+                addView(badgeView, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.END
+                    topMargin = 8 * dp
+                    rightMargin = 8 * dp
+                })
+                layoutParams = AbsListView.LayoutParams(
+                    AbsListView.LayoutParams.MATCH_PARENT, tileSide
+                )
                 setOnClickListener {
-                    // В режиме выбора тап = выбрать/снять; иначе — мгновенная вставка.
-                    if (selected.isNotEmpty() || selectionCount > 0) {
-                        if (selected.containsKey(message.id)) deselect(message)
-                        else select(message)
-                    } else {
-                        onMessageTap(message)
-                    }
+                    val msg = messageFromTag() ?: return@setOnClickListener
+                    onTileTap(msg)
                 }
                 setOnLongClickListener {
-                    onMessageLongTap(message)
+                    val msg = messageFromTag() ?: return@setOnLongClickListener false
+                    onTileLongTap(msg)
                     true
                 }
+            }
+
+            private fun messageFromTag(): MessageEntity? =
+                openCell?.orderedMessages?.firstOrNull { it.id == boundId }
+
+            fun bind(message: MessageEntity) {
+                boundId = message.id
+                val isSelected = selected.containsKey(message.id)
+                textView.text = message.text.trim()
+                val bg = GradientDrawable().apply {
+                    // Плотная плитка — не сливается со стеклом фона.
+                    setColor(
+                        if (isSelected) Color.parseColor(ITEM_BG_SELECTED)
+                        else Color.parseColor(ITEM_BG)
+                    )
+                    cornerRadius = 16 * dp.toFloat()
+                    if (isSelected) setStroke(2 * dp, Color.parseColor(ACCENT))
+                }
+                background = RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)), bg, null
+                )
+                if (isSelected) {
+                    badgeView.visibility = View.VISIBLE
+                    badgeView.text = "${selectionOrder[message.id] ?: 0}"
+                    // Поп — только когда состояние ИЗМЕНИЛОСЬ (не при рецикле).
+                    if (!wasSelected) {
+                        badgeView.scaleX = 0.6f
+                        badgeView.scaleY = 0.6f
+                        badgeView.animate().scaleX(1f).scaleY(1f).setDuration(150)
+                            .setInterpolator(OvershootInterpolator(1.3f)).start()
+                    }
+                } else {
+                    badgeView.visibility = View.GONE
+                }
+                wasSelected = isSelected
+                contentDescription = "Сообщение: ${message.text.take(40)}"
             }
         }
 
@@ -621,7 +664,7 @@ object OverlayPastePanel {
                     },
                     null,
                 )
-                layoutParams = android.widget.LinearLayout.LayoutParams(34 * dp, 34 * dp)
+                layoutParams = LinearLayout.LayoutParams(34 * dp, 34 * dp)
             }
 
         private fun screenPx(): Point {
@@ -640,13 +683,14 @@ object OverlayPastePanel {
         ).toInt().coerceAtLeast(1)
 
         companion object {
-            // Стекло: плотное, но с бликом — «frosted», не вырвиглазная дымка
             private const val GLASS_FILL = "#D9101014"
             private const val GLASS_SHEEN = "#26FFFFFF"
             private const val GLASS_SHADE = "#0D000000"
             private const val GLASS_STROKE = "#40FFFFFF"
 
-            private const val ITEM_BG = "#801C1C22"
+            // Плитки/строки: ПЛОТНЫЕ, контраст к стеклу.
+            private const val ITEM_BG = "#F01C1C22"
+            private const val ITEM_BG_SELECTED = "#F0262B36"
             private const val RIPPLE = "#26FFFFFF"
 
             private const val TEXT = "#FFF5F6FA"
@@ -660,7 +704,7 @@ object OverlayPastePanel {
     }
 
     /**
-     * Корень: гасит BACK (закрытие — только ✕ или успешная вставка),
+     * Корень: BACK гасится (закрытие — только ✕ или успешная вставка),
      * окно строго статичное.
      */
     private class PastePanelRoot(context: Context) : FrameLayout(context) {
