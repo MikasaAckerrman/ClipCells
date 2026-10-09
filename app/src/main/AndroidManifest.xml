@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- Floating overlay panel above every app. Copy-as-File architecture:
@@ -9,9 +10,9 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Self-heal: система регулярно затирает список a11y-сервисов; приложение
          само дописывает себя (write-only настройка, выдаётся рутом/adb). -->
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
-        tools:ignore="ProtectedPermissions"
-        xmlns:tools="http://schemas.android.com/tools" />
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:allowBackup="false"
