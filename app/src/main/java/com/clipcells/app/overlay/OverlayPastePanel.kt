@@ -12,6 +12,7 @@ import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -231,7 +232,7 @@ object OverlayPastePanel {
             list = ListView(app).apply {
                 divider = null
                 adapter = listAdapter
-                verticalScrollBarEnabled = false
+                isVerticalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 cacheColorHint = Color.TRANSPARENT
                 setSelector(android.R.color.transparent)
