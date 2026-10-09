@@ -331,24 +331,86 @@ object OverlayPastePanel {
             root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
             Thread {
                 val result = PasteAccessibilityService.pasteAtCursor(app.packageName, text)
-                Handler(Looper.getMainLooper()).post {
-                    pasting = false
-                    android.util.Log.i(TAG, "paste [$what] -> $result")
-                    when (result) {
-                        PasteResult.Pasted -> {
-                            feedback("Вставлено: $what", OK_GREEN)
-                            // Автозакрытие: миссия панели выполнена одним тапом.
-                            root.postDelayed({ hide(animate = true) }, 90)
+                android.util.Log.i(TAG, "paste [$what] -> $result")
+                if (result == PasteResult.Pasted) {
+                    Handler(Looper.getMainLooper()).post {
+                        pasting = false
+                        feedback("Вставлено: $what", OK_GREEN)
+                        // Автозакрытие: миссия панели выполнена одним тапом.
+                        root.postDelayed({ hide(animate = true) }, 90)
+                    }
+                } else if (result is PasteResult.Rejected) {
+                    // Поле отвергло SET_TEXT (WebView/кастомное): буфер + PASTE.
+                    // Запись буфера легальна только из фокусированного окна —
+                    // панель на миг становится фокусируемой, пишет, возвращает
+                    // NOT_FOCUSABLE; читает буфер само приложение (оно в фокусе).
+                    pasteViaClipboard(text, what)
+                } else {
+                    Handler(Looper.getMainLooper()).post {
+                        pasting = false
+                        when (result) {
+                            PasteResult.NoService ->
+                                feedback("Сервис «Прямая вставка» не включён", ACCENT)
+                            else -> feedback("Нет поля ввода под панелью", ACCENT)
                         }
-                        PasteResult.NoService ->
-                            feedback("Сервис «Прямая вставка» не включён", ACCENT)
-                        PasteResult.NoField ->
-                            feedback("Нет поля ввода под панелью", ACCENT)
-                        is PasteResult.Rejected ->
-                            feedback("Поле не приняло текст (${result.nodeClass})", ACCENT)
                     }
                 }
             }.start()
+        }
+
+        /** Фолбэк-вставка через системный буфер + ACTION_PASTE. */
+        private fun pasteViaClipboard(text: String, what: String) {
+            val lp = root.layoutParams as? WindowManager.LayoutParams
+            if (lp == null) {
+                Handler(Looper.getMainLooper()).post { pasting = false }
+                return
+            }
+            val latch = java.util.concurrent.CountDownLatch(1)
+            root.post {
+                // Слушатель ДО перевода окна в фокусируемое — иначе событие теряем.
+                val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+                    if (hasFocus) latch.countDown()
+                }
+                root.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+                lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                try {
+                    wm.updateViewLayout(root, lp)
+                } catch (_: Exception) {
+                    latch.countDown()
+                }
+                Thread {
+                    try { latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: InterruptedException) {}
+                    try {
+                        (app.getSystemService(android.content.ClipboardManager::class.java))
+                            ?.setPrimaryClip(
+                                android.content.ClipData.newPlainText("ClipCells", text)
+                            )
+                    } catch (_: Exception) {
+                    }
+                    val pasted = PasteAccessibilityService.performPasteAction(app.packageName)
+                    root.post {
+                        try {
+                            root.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+                        } catch (_: Exception) {
+                        }
+                        // Окно снова НЕ фокусируемое: клавиатуру не держим, фокус
+                        // возвращается приложению под панелью.
+                        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        try {
+                            wm.updateViewLayout(root, lp)
+                        } catch (_: Exception) {
+                        }
+                        pasting = false
+                        android.util.Log.i(TAG, "paste [$what] clipboard-fallback -> $pasted")
+                        if (pasted) {
+                            feedback("Вставлено: $what", OK_GREEN)
+                            root.postDelayed({ hide(animate = true) }, 90)
+                        } else {
+                            feedback("Поле не приняло текст — попробуй вручную", ACCENT)
+                        }
+                    }
+                }.start()
+            }
         }
 
         private fun feedback(text: String, color: String) {

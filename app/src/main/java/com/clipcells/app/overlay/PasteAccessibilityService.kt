@@ -130,30 +130,61 @@ class PasteAccessibilityService : AccessibilityService() {
             val service = instance ?: return PasteResult.NoService
             return try {
                 val node = findEditableNode(service, selfPkg) ?: return PasteResult.NoField
-                val current = node.text
-                val args = Bundle()
-                val payload = if (current.isNullOrEmpty()) {
-                    text
-                } else {
-                    val start = node.textSelectionStart.coerceIn(0, current.length)
-                    val end = node.textSelectionEnd.coerceIn(start, current.length)
-                    // Выделение есть — заменяем его; курсор — вставляем в него.
-                    buildString {
-                        append(current.subSequence(0, start))
-                        append(text)
-                        append(current.subSequence(end, current.length))
-                    }
-                }
-                args.putCharSequence(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, payload
-                )
-                val ok = try {
-                    node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                } catch (_: Throwable) { false }
+                // Парольные поля не трогаем — политика и безопасность.
+                if (node.isPassword) return PasteResult.Rejected("парольное поле")
+                val ok = setWithCursor(node, text)
                 if (ok) PasteResult.Pasted
-                else PasteResult.Rejected(node.className?.toString() ?: "?")
+                // Узел мог протухнуть (перестройка окна чата за время вставки) —
+                // перевзять СВЕЖИЙ узел и повторить один раз.
+                val fresh = findEditableNode(service, selfPkg)
+                if (!ok && fresh != null && fresh !== node) {
+                    if (setWithCursor(fresh, text)) return PasteResult.Pasted
+                }
+                PasteResult.Rejected(node.className?.toString() ?: "?")
             } catch (_: Throwable) {
                 PasteResult.NoField
+            }
+        }
+
+        /** SET_TEXT с учётом позиции КУРСОРА (не заменяет весь текст поля). */
+        private fun setWithCursor(node: AccessibilityNodeInfo, text: String): Boolean {
+            val current = node.text
+            val args = Bundle()
+            val payload = if (current.isNullOrEmpty()) {
+                text
+            } else {
+                val start = node.textSelectionStart.coerceIn(0, current.length)
+                val end = node.textSelectionEnd.coerceIn(start, current.length)
+                // Выделение есть — заменяем его; курсор — вставляем в него.
+                buildString {
+                    append(current.subSequence(0, start))
+                    append(text)
+                    append(current.subSequence(end, current.length))
+                }
+            }
+            args.putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, payload
+            )
+            return try {
+                node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            } catch (_: Throwable) { false }
+        }
+
+        /**
+         * Фолбэк для полей, отвергших SET_TEXT (WebView/кастомные вью): буфер
+         * кладёт ПАНЕЛЬ (пока её окно мигом фокусируемо — легальная запись),
+         * здесь — только ACTION_FOCUS + ACTION_PASTE: читает буфер само
+         * целевое приложение (оно в фокусе — чтение легально).
+         */
+        fun performPasteAction(selfPkg: String): Boolean {
+            val service = instance ?: return false
+            return try {
+                val node = findEditableNode(service, selfPkg) ?: return false
+                if (node.isPassword) return false
+                node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            } catch (_: Throwable) {
+                false
             }
         }
 
