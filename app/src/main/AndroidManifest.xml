@@ -7,6 +7,11 @@
          process alive and exempt from the freezer, so idle cost is zero.
          SYSTEM_ALERT_WINDOW is a special-access appop. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Self-heal: система регулярно затирает список a11y-сервисов; приложение
+         само дописывает себя (write-only настройка, выдаётся рутом/adb). -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions"
+        xmlns:tools="http://schemas.android.com/tools" />
 
     <application
         android:allowBackup="false"

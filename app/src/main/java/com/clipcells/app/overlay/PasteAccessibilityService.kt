@@ -64,6 +64,46 @@ class PasteAccessibilityService : AccessibilityService() {
         }
 
         /**
+         * SELF-HEAL (v0.15.3): системный список a11y-сервисов регулярно
+         * ЗАТИРАЕТСЯ (ROM-чистки, другие приложения дописывают «только себя»).
+         * Приложение само дописывает себя в КОНЕЦ списка (чужие записи не
+         * трогаем, разделитель — двоеточие) и поднимает общий выключатель.
+         * Нужен WRITE_SECURE_SETTINGS (выдаётся рутом один раз, переживает
+         * обновления); без него — тихий no-op и обычный фидбек.
+         */
+        fun ensureEnabled(context: Context): Boolean {
+            if (isEnabledInSettings(context)) return true
+            val mine = ComponentName(context, PasteAccessibilityService::class.java)
+                .flattenToString()
+            return try {
+                val current = Settings.Secure.getString(
+                    context.contentResolver,
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                )?.trim().orEmpty()
+                val merged = when {
+                    current.isEmpty() || current == "null" -> mine
+                    current.split(':').any { it.equals(mine, ignoreCase = true) } -> current
+                    else -> "$current:$mine"
+                }
+                Settings.Secure.putString(
+                    context.contentResolver,
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                    merged,
+                )
+                Settings.Secure.putInt(
+                    context.contentResolver,
+                    Settings.Secure.ACCESSIBILITY_ENABLED,
+                    1,
+                )
+                android.util.Log.i("ClipCellsPaste", "a11y self-healed: $merged")
+                true
+            } catch (e: Exception) {
+                android.util.Log.w("ClipCellsPaste", "a11y self-heal failed", e)
+                false
+            }
+        }
+
+        /**
          * Вставляет [text] в сфокусированное редактируемое поле активного
          * чужого окна. Binder-вызов — звать с рабочего потока. Наш собственный
          * оверлей пропускается, свои поля не трогаем.

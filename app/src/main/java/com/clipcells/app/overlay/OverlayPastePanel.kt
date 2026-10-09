@@ -60,12 +60,16 @@ object OverlayPastePanel {
 
     /**
      * Одноразовая загрузка + показ. Позиция — по границам сфокусированного
-     * поля ( Binder-чтение в рабочем потоке, окно в главном).
+     * поля ( Binder-чтение в рабочем потоке, окно в главном). Перед чтением —
+     * self-heal a11y-сервиса: список в настройках регулярно затирается.
      */
     fun launch(context: Context) {
         if (isShowing()) return
         val app = context.applicationContext
         Thread {
+            PasteAccessibilityService.ensureEnabled(app)
+            // Дать системе миг на привязку сервиса после self-heal.
+            try { Thread.sleep(400) } catch (_: InterruptedException) { return@Thread }
             val bounds = PasteAccessibilityService.focusedFieldBounds(app.packageName)
             val cells = try {
                 ClipCellsDatabase.get(app).cellDao().getAllSync()
