@@ -80,14 +80,21 @@ object OverlayPastePanel {
         }.start()
     }
 
-    fun hide(animate: Boolean = true) {
+    fun hide(animate: Boolean = true, delayMs: Long = 0L) {
         val root = liveRoot ?: return
         if (dismissing) return
         dismissing = true
         val wm = liveWm ?: return
-        if (animate) {
-            exit(root) { removeWindow(wm, root) }
-            root.postDelayed({ if (liveRoot === root) removeWindow(wm, root) }, 230)
+        val content = root.getChildAt(0)
+        if (animate && content != null) {
+            exit(root, content, delayMs) { removeWindow(wm, root) }
+            // Движок Copy as File: таймер ГОРАЗДО позже конца анимации (600мс) —
+            // он существует только для зависшего аниматора, НЕ как гильотина
+            // посреди анимации (короткий таймер = рывок/мигание).
+            root.postDelayed(
+                { if (liveRoot === root) removeWindow(wm, root) },
+                delayMs + 600
+            )
         } else {
             removeWindow(wm, root)
         }
@@ -104,7 +111,7 @@ object OverlayPastePanel {
             liveWm = wm
             liveUi = ui
             dismissing = false
-            enter(ui.root)
+            enter(ui.root, ui.root.getChildAt(0))
             android.util.Log.i(TAG, "paste panel shown cells=${cells.size}")
         } catch (e: Exception) {
             android.util.Log.w(TAG, "paste panel addView failed", e)
@@ -114,6 +121,8 @@ object OverlayPastePanel {
     private fun removeWindow(wm: WindowManager, root: View) {
         windowAnim?.cancel()
         windowAnim = null
+        // Вернуть обычный режим отрисовки (hardware-слой был только на анимации).
+        root.setLayerType(View.LAYER_TYPE_NONE, null)
         liveRoot = null
         liveWm = null
         liveUi = null
@@ -129,16 +138,21 @@ object OverlayPastePanel {
     // Движок Copy as File: один аниматор; hide() сперва гасит вход —
     // вход и выход никогда не спорят за окно (= нет «пульсации»).
 
-    private fun enter(root: View) {
+    /**
+     * Вход: окно (стекло) проявляется, КОНТЕНТ внутри масштабируется — окно
+     * само не скейлится (масштаб overlay-корня = дорогая перерисовка окна
+     * каждый кадр — источник мерцания; Copy as File скейлит карточку внутри).
+     */
+    private fun enter(root: View, content: View) {
         windowAnim?.cancel()
         root.alpha = 0f
-        root.scaleX = 0.94f
-        root.scaleY = 0.94f
+        content.scaleX = 0.94f
+        content.scaleY = 0.94f
         AnimatorSet().apply {
             playTogether(
                 ObjectAnimator.ofFloat(root, View.ALPHA, 0f, 1f),
-                ObjectAnimator.ofFloat(root, View.SCALE_X, 0.94f, 1f),
-                ObjectAnimator.ofFloat(root, View.SCALE_Y, 0.94f, 1f),
+                ObjectAnimator.ofFloat(content, View.SCALE_X, 0.94f, 1f),
+                ObjectAnimator.ofFloat(content, View.SCALE_Y, 0.94f, 1f),
             )
             duration = 140
             interpolator = DecelerateInterpolator(1.3f)
@@ -153,16 +167,28 @@ object OverlayPastePanel {
         }
     }
 
-    private fun exit(root: View, end: () -> Unit) {
+    /**
+     * Выход — движок Copy as File (анти-дрожь):
+     *  1. activeAnim.cancel() — ещё играющий вход не спорит с выходом.
+     *  2. HARDWARE-слой на время фейда: окно рендерится в текстуру ОДИН раз,
+     *     дальше затухание — чистая работа композитора (иммунно к лагам
+     *     главного потока; масштабирование корня окна мы не делаем вовсе).
+     *  3. delayMs — путь сразу после binder-нагрузки (автозакрытие после
+     *     вставки) отдаёт ~120мс на завершение системных вызовов ДО старта
+     *     анимации, чтобы её первые кадры не подвисали.
+     */
+    private fun exit(root: View, content: View, delayMs: Long, end: () -> Unit) {
         windowAnim?.cancel() // вход (если ещё играл) НЕ спорит с выходом
+        root.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         AnimatorSet().apply {
+            startDelay = delayMs
             playTogether(
                 ObjectAnimator.ofFloat(root, View.ALPHA, root.alpha, 0f),
-                ObjectAnimator.ofFloat(root, View.SCALE_X, root.scaleX, 0.96f),
-                ObjectAnimator.ofFloat(root, View.SCALE_Y, root.scaleY, 0.96f),
+                ObjectAnimator.ofFloat(content, View.SCALE_X, content.scaleX, 0.96f),
+                ObjectAnimator.ofFloat(content, View.SCALE_Y, content.scaleY, 0.96f),
             )
-            duration = 110
-            interpolator = AccelerateInterpolator(1.2f)
+            duration = 160
+            interpolator = AccelerateInterpolator(1.15f)
             addListener(object : android.animation.Animator.AnimatorListener {
                 override fun onAnimationStart(a: android.animation.Animator) {}
                 override fun onAnimationCancel(a: android.animation.Animator) { end() }
@@ -204,11 +230,14 @@ object OverlayPastePanel {
         /** Открытая ячейка (экран сообщений), null = экран ячеек. */
         private var openCell: CellWithMessages? = null
 
-        /** Мульти-выбор: id → сообщение; порядок выбора отдельной картой. */
-        private val selected = LinkedHashMap<Long, MessageEntity>()
-        private val selectionOrder = LinkedHashMap<Long, Int>()
-        private var selectionCount = 0
-        private var nextOrder = 1
+        /**
+         * Мульти-выбор: ПОСЛЕДОВАТЕЛЬНОСТЬ тапов (id в порядке выбора).
+         * Бейдж = позиция+1 — числа ВСЕГДА 1..N без дыр и роста: снял выбор —
+         * хвост автоматически сдвигается (раньше счётчик рос бесконечно и
+         * показывал «10+» на пяти плитках).
+         */
+        private val selectionSequence = ArrayList<Long>()
+        private val selected = HashMap<Long, MessageEntity>()
 
         fun build() {
             root = PastePanelRoot(app).apply {
@@ -237,7 +266,7 @@ object OverlayPastePanel {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
             header.addView(titleView)
-            header.addView(iconButton("‹", "Назад к ячейкам") { backToCells() }.apply {
+            header.addView(backIconButton { backToCells() }.apply {
                 visibility = View.GONE
                 backBtn = this
             })
@@ -307,7 +336,7 @@ object OverlayPastePanel {
             ))
         }
 
-        private var backBtn: TextView? = null
+        private var backBtn: View? = null
 
         fun windowParams(): WindowManager.LayoutParams =
             WindowManager.LayoutParams(
@@ -335,9 +364,7 @@ object OverlayPastePanel {
         private fun openMessages(cell: CellWithMessages) {
             openCell = cell
             selected.clear()
-            selectionOrder.clear()
-            selectionCount = 0
-            nextOrder = 1
+            selectionSequence.clear()
             titleView.text = cell.cell.name
             backBtn?.visibility = View.VISIBLE
             cellsList.visibility = View.GONE
@@ -351,9 +378,7 @@ object OverlayPastePanel {
             if (openCell == null) return
             openCell = null
             selected.clear()
-            selectionOrder.clear()
-            selectionCount = 0
-            nextOrder = 1
+            selectionSequence.clear()
             titleView.text = "Вставка"
             backBtn?.visibility = View.GONE
             grid.visibility = View.GONE
@@ -366,7 +391,7 @@ object OverlayPastePanel {
         // ---------------------------------------------------- вставка
 
         private fun onTileTap(message: MessageEntity) {
-            if (selected.isNotEmpty()) {
+            if (selectionSequence.isNotEmpty()) {
                 // Режим выбора: тап = переключить.
                 if (selected.containsKey(message.id)) deselect(message) else select(message)
                 return
@@ -385,25 +410,24 @@ object OverlayPastePanel {
 
         private fun select(message: MessageEntity) {
             selected[message.id] = message
-            selectionOrder[message.id] = nextOrder++
-            selectionCount++
+            selectionSequence.add(message.id)
             refreshSendButton()
             gridAdapter.notifyDataSetChanged()
         }
 
         private fun deselect(message: MessageEntity) {
             selected.remove(message.id)
-            selectionOrder.remove(message.id)
-            selectionCount--
+            selectionSequence.remove(message.id)
             refreshSendButton()
             gridAdapter.notifyDataSetChanged()
         }
 
         private fun refreshSendButton() {
-            if (selectionCount > 0) {
+            val count = selectionSequence.size
+            if (count > 0) {
                 val wasGone = sendBtn.visibility != View.VISIBLE
                 sendBtn.visibility = View.VISIBLE
-                sendBtn.text = if (selectionCount == 1) "Вставить" else "Вставить $selectionCount"
+                sendBtn.text = if (count == 1) "Вставить" else "Вставить $count"
                 if (wasGone) {
                     sendBtn.alpha = 0f
                     sendBtn.animate().alpha(1f).setDuration(120)
@@ -418,8 +442,8 @@ object OverlayPastePanel {
         }
 
         private fun sendSelection() {
-            if (selected.isEmpty() || pasting) return
-            val ordered = selected.values.sortedBy { selectionOrder[it.id] ?: 0 }
+            if (selectionSequence.isEmpty() || pasting) return
+            val ordered = selectionSequence.mapNotNull { selected[it] }
             paste(ordered.map { it.text }, "выбрано ${ordered.size}")
         }
 
@@ -440,12 +464,17 @@ object OverlayPastePanel {
                     val retried = if (healed) {
                         PasteAccessibilityService.pasteAtCursor(app.packageName, text)
                     } else null
-                    Handler(Looper.getMainLooper()).post { pasting = false; if (retried == PasteResult.Pasted) hide(true) }
+                    Handler(Looper.getMainLooper()).post {
+                        pasting = false
+                        if (retried == PasteResult.Pasted) hide(animate = true, delayMs = 120)
+                    }
                     return@Thread
                 }
                 Handler(Looper.getMainLooper()).post {
                     pasting = false
-                    if (result == PasteResult.Pasted) hide(animate = true)
+                    // delayMs: binder-последствия вставки завершаются ДО
+                    // первых кадров анимации закрытия (анти-подвисание).
+                    if (result == PasteResult.Pasted) hide(animate = true, delayMs = 120)
                 }
             }.start()
         }
@@ -561,24 +590,30 @@ object OverlayPastePanel {
 
         /** Плитка: квадрат, превью текста, бейдж порядка при выборе. */
         private inner class MessageTileView(context: Context) : FrameLayout(context) {
+            private val scroller: android.widget.ScrollView
             private val textView: TextView
             private val badgeView: TextView
             private var boundId: Long = -1L
             private var wasSelected = false
 
             init {
-                isClickable = true
-                isLongClickable = true
+                // СКРОЛЛ ТЕКСТА внутри плитки: полный текст читается прокруткой
+                // (тап без движения = клик-вставка, движение = скролл текста).
+                scroller = android.widget.ScrollView(context).apply {
+                    isFillViewport = false
+                    isVerticalScrollBarEnabled = false
+                    overScrollMode = View.OVER_SCROLL_NEVER
+                }
                 textView = TextView(context).apply {
                     textSize = 11f
                     setTextColor(Color.parseColor(TEXT_SOFT))
-                    maxLines = 7
-                    ellipsize = TextUtils.TruncateAt.END
                     setLineSpacing(1 * dp.toFloat(), 1.02f)
                     setPadding(10 * dp, 10 * dp, 10 * dp, 10 * dp)
-                    gravity = Gravity.TOP or Gravity.START
                 }
-                addView(textView, FrameLayout.LayoutParams(
+                scroller.addView(textView, ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+                ))
+                addView(scroller, FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
                 ))
                 badgeView = TextView(context).apply {
@@ -598,11 +633,12 @@ object OverlayPastePanel {
                 layoutParams = AbsListView.LayoutParams(
                     AbsListView.LayoutParams.MATCH_PARENT, tileSide
                 )
-                setOnClickListener {
+                // Клик/лонг-клик на СКРОЛЛЕ (тап-без-движения = клик).
+                scroller.setOnClickListener {
                     val msg = messageFromTag() ?: return@setOnClickListener
                     onTileTap(msg)
                 }
-                setOnLongClickListener {
+                scroller.setOnLongClickListener {
                     val msg = messageFromTag() ?: return@setOnLongClickListener false
                     onTileLongTap(msg)
                     true
@@ -615,6 +651,7 @@ object OverlayPastePanel {
             fun bind(message: MessageEntity) {
                 boundId = message.id
                 val isSelected = selected.containsKey(message.id)
+                // Полный текст — ScrollView покажет прокруткой (maxLines нет).
                 textView.text = message.text.trim()
                 val bg = GradientDrawable().apply {
                     // Плотная плитка — не сливается со стеклом фона.
@@ -630,7 +667,9 @@ object OverlayPastePanel {
                 )
                 if (isSelected) {
                     badgeView.visibility = View.VISIBLE
-                    badgeView.text = "${selectionOrder[message.id] ?: 0}"
+                    // Порядковый номер = позиция в ПОСЛЕДОВАТЕЛЬНОСТИ тапов
+                    // (1..N без дыр — перенумерация автоматична при снятии).
+                    badgeView.text = "${(selectionSequence.indexOf(message.id) + 1)}"
                     // Поп — только когда состояние ИЗМЕНИЛОСЬ (не при рецикле).
                     if (!wasSelected) {
                         badgeView.scaleX = 0.6f
@@ -647,6 +686,23 @@ object OverlayPastePanel {
         }
 
         // ------------------------------------------------------- утил
+
+        /** Кнопка «назад»: вектор-стрелка 44dp (крупная, читаемая). */
+        private fun backIconButton(onClick: () -> Unit): android.widget.ImageView =
+            android.widget.ImageView(app).apply {
+                setImageResource(com.clipcells.app.R.drawable.ic_back)
+                contentDescription = "Назад к ячейкам"
+                setOnClickListener { onClick() }
+                background = RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(Color.parseColor(RIPPLE)),
+                    GradientDrawable().apply {
+                        setColor(Color.parseColor("#00FFFFFF"))
+                        cornerRadius = 22 * dp.toFloat()
+                    },
+                    null,
+                )
+                layoutParams = LinearLayout.LayoutParams(44 * dp, 44 * dp)
+            }
 
         private fun iconButton(glyph: String, description: String, onClick: () -> Unit): TextView =
             TextView(app).apply {
