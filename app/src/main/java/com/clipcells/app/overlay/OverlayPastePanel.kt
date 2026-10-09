@@ -207,7 +207,10 @@ object OverlayPastePanel {
             if (landscape) minOf(444 * dp, (screen.x * 0.40f).toInt())
             else minOf(444 * dp, (screen.x * 0.88f).toInt())
         private val panelH =
-            if (landscape) (screen.y * 0.92f).toInt().coerceAtLeast(380 * dp)
+            // Ландшафт: 84% высоты — нижние/верхние углы НЕ уходят под жестовую
+            // полосу и скруглённые углы экрана (метрики окна включают navbar,
+            // 92% прижимали низ в зону жестов — «окно за экраном»).
+            if (landscape) (screen.y * 0.84f).toInt().coerceAtLeast(340 * dp)
             else 420 * dp
 
         /** Сторона квадратной плитки сообщения: 4 в ряд. */
@@ -353,7 +356,11 @@ object OverlayPastePanel {
                 // Окно СТРОГО статично: портрет — верх-центр; ландшафт —
                 // правая колонна (правый край, вертикально по центру).
                 if (landscape) {
+                    // Правая колонна с отступом от края: рамка стекла видна,
+                    // окно не «уходит за экран» (END-гравитация: x = отступ
+                    // от правого края внутрь).
                     gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                    x = 18 * dp
                 } else {
                     gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                     y = (screen.y * 0.055f).toInt()
