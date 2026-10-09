@@ -200,8 +200,15 @@ object OverlayPastePanel {
         private val dp = dpFactor()
         private val screen = screenPx()
 
-        private val panelW = minOf(444 * dp, (screen.x * 0.88f).toInt())
-        private val panelH = 420 * dp
+        /** Landscape: статичная правая колонна (правый край, по центру
+            вертикали). Portrait: прежнее верх-центр. */
+        private val landscape = screen.x > screen.y
+        private val panelW =
+            if (landscape) minOf(444 * dp, (screen.x * 0.40f).toInt())
+            else minOf(444 * dp, (screen.x * 0.88f).toInt())
+        private val panelH =
+            if (landscape) (screen.y * 0.92f).toInt().coerceAtLeast(380 * dp)
+            else 420 * dp
 
         /** Сторона квадратной плитки сообщения: 4 в ряд. */
         private val tileSide = (panelW - 32 * dp - 3 * (8 * dp)) / 4
