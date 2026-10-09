@@ -281,19 +281,19 @@ object OverlayPastePanel {
                 panelW,
                 panelH,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                // Фокусируемое окно БЕЗ редакторов: система прячет IME, пока
-                // панель работает (клавиатура не вызывается). Тачи вокруг
-                // панели по-прежнему уходят в приложение под ней.
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                // НЕфокусируемое окно: поле чата сохраняет фокус — курсор
+                // мигает, позиция курсора ИЗВЕСТНА -> вставка точно в него.
+                // Панель физически не может вызвать клавиатуру (нет фокуса);
+                // панель сверху, клавиатура снизу — не пересекаются.
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 android.graphics.PixelFormat.TRANSLUCENT,
             ).apply {
                 // ОКНО ВСЕГДА В ФИКСИРОВАННОМ ПОЛОЖЕНИИ (ТЗ v0.16): верх-центр,
                 // не вычисляется по полю, не двигается никогда.
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 y = (screen.y * 0.06f).toInt()
-                // Панель фокусируема и НЕ содержит редакторов: IME-сервис
-                // системы прячет клавиатуру на время работы панели —
-                // клавиатура не вызывается, пока окно открыто.
+                // Даже при случайном фокусе — IME не поднимать.
                 softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
                 if (Build.VERSION.SDK_INT >= 28) {
                     layoutInDisplayCutoutMode =
@@ -381,13 +381,19 @@ object OverlayPastePanel {
             }
             val latch = java.util.concurrent.CountDownLatch(1)
             root.post {
-                // Окно панели УЖЕ фокусируемо (ТЗ v0.16: IME спрятан) — буфер
-                // пишем легально; ждём окно-фокус для надёжности.
+                // Панель нефокусируема: для ЛЕГАЛЬНОЙ записи буфера (Android 10+)
+                // на миг делаем окно фокусируемым — слушатель ставим ДО перевода,
+                // иначе событие теряем.
                 val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
                     if (hasFocus) latch.countDown()
                 }
                 root.viewTreeObserver.addOnWindowFocusChangeListener(listener)
-                if (root.hasWindowFocus()) latch.countDown()
+                lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                try {
+                    wm.updateViewLayout(root, lp)
+                } catch (_: Exception) {
+                    latch.countDown()
+                }
                 Thread {
                     try { latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: InterruptedException) {}
                     try {
@@ -403,8 +409,14 @@ object OverlayPastePanel {
                             root.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
                         } catch (_: Exception) {
                         }
+                        // Вернуть НЕфокусируемость: фокус — приложению под панелью.
                         try {
                             root.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+                        } catch (_: Exception) {
+                        }
+                        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        try {
+                            wm.updateViewLayout(root, lp)
                         } catch (_: Exception) {
                         }
                         pasting = false
