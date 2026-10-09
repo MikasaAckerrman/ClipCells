@@ -350,8 +350,14 @@ object OverlayPastePanel {
                     or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 android.graphics.PixelFormat.TRANSLUCENT,
             ).apply {
-                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                y = (screen.y * 0.055f).toInt()
+                // Окно СТРОГО статично: портрет — верх-центр; ландшафт —
+                // правая колонна (правый край, вертикально по центру).
+                if (landscape) {
+                    gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                } else {
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    y = (screen.y * 0.055f).toInt()
+                }
                 softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
                 if (Build.VERSION.SDK_INT >= 28) {
                     layoutInDisplayCutoutMode =
