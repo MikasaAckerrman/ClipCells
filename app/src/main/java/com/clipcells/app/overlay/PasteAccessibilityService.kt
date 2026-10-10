@@ -15,9 +15,6 @@ sealed interface PasteResult {
     object NoService : PasteResult
     object NoField : PasteResult
     data class Rejected(val nodeClass: String) : PasteResult
-    /** Поле есть и сфокусировано, но НЕ редактируемое (терминалы, WebView):
-     *  прямой записи нет — панель обязана пройти буферным путём ACTION_PASTE. */
-    data class NotEditable(val nodeClass: String) : PasteResult
 }
 
 /**
@@ -183,17 +180,6 @@ class PasteAccessibilityService : AccessibilityService() {
         ): PasteResult {
             val service = instance ?: return PasteResult.NoService
             return try {
-                // 1) Сфокусированный узел ЛЮБОГО типа (терминал не editable!):
-                //    не редактируемый — буферный путь (ACTION_PASTE).
-                findFocusedNode(service, selfPkg, includeSelf)?.let { focused ->
-                    if (!focused.isEditable) {
-                        return if (focused.isPassword) {
-                            PasteResult.Rejected("парольное поле")
-                        } else {
-                            PasteResult.NotEditable(focused.className?.toString() ?: "?")
-                        }
-                    }
-                }
                 val node = findEditableNode(service, selfPkg, includeSelf) ?: return PasteResult.NoField
                 // Парольные поля не трогаем — политика и безопасность.
                 if (node.isPassword) return PasteResult.Rejected("парольное поле")
@@ -209,27 +195,6 @@ class PasteAccessibilityService : AccessibilityService() {
             } catch (_: Throwable) {
                 PasteResult.NoField
             }
-        }
-
-        /** Сфокусированный узел ЛЮБОГО типа в чужом окне (терминал, WebView). */
-        private fun findFocusedNode(
-            service: PasteAccessibilityService,
-            selfPkg: String,
-            includeSelf: Boolean,
-        ): AccessibilityNodeInfo? {
-            try {
-                val windowList = service.windows
-                for (window in windowList.sortedByDescending { it.isActive }) {
-                    val root = try { window.root } catch (_: Throwable) { null } ?: continue
-                    if (!includeSelf && root.packageName == selfPkg) continue
-                    val focused = try {
-                        root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-                    } catch (_: Throwable) { null }
-                    if (focused != null) return focused
-                }
-            } catch (_: Throwable) {
-            }
-            return null
         }
 
         /**
@@ -280,113 +245,10 @@ class PasteAccessibilityService : AccessibilityService() {
         fun performPasteActionForTest(selfPkg: String): Boolean =
             performPasteActionInternal(selfPkg, includeSelf = true)
 
-        /**
-         * Termux-канал (анализ исходников termux-app): вставка в терминал
-         * возможна ТОЛЬКО через Ctrl+V (клавиши — извне не отправить), среднюю
-         * кнопку мыши или ТЕКСТОВЫЙ ТУЛБАР (настоящий EditText
-         * terminal_toolbar_text_input: EditorAction -> session.write).
-         * Пишем текст туда SET_TEXT'ом и фокусируем: клавиатура открывается,
-         * текст уже в поле — юзеру остаётся Enter (или мы диспатчим тап).
-         * Возвращает true, если текст положен в поле тулбара.
-         */
-        fun pasteIntoTermuxToolbar(selfPkg: String, text: String): Boolean {
-            val service = instance ?: return false
-            return try {
-                val windows = service.windows
-                for (window in windows.sortedByDescending { it.isActive }) {
-                    val root = try { window.root } catch (_: Throwable) { null } ?: continue
-                    if (root.packageName == selfPkg) continue
-                    val input = root.findAccessibilityNodeInfosByViewId(
-                        "com.termux:id/terminal_toolbar_text_input"
-                    ).firstOrNull() ?: continue
-                    if (!input.isVisibleToUser) continue
-                    val args = Bundle()
-                    args.putCharSequence(
-                        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text
-                    )
-                    val ok = try {
-                        input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                    } catch (_: Throwable) { false }
-                    if (ok) {
-                        try { input.performAction(AccessibilityNodeInfo.ACTION_FOCUS) } catch (_: Throwable) {}
-                        android.util.Log.i(
-                            "ClipCellsPaste",
-                            "termux toolbar: text set (${text.length} chars), focused"
-                        )
-                        return true
-                    }
-                }
-                false
-            } catch (_: Throwable) {
-                false
-            }
-        }
-
-        /**
-         * ТРЕТИЙ ЭШЕЛОН — Termux и любые View без ACTION_PASTE: сервис
-         * СИНТЕЗИРУЕТ долгое нажатие в центр сфокусированного узла
-         * (dispatchGesture — официальное API a11y-сервисов) → в выпавшем меню
-         * (контекстное меню Termux / тулбар выделения Android) находит пункт
-         * «Вставить» и кликает его — терминал читает буфер СВОИМ механизмом.
-         * Звать ПОСЛЕ записи буфера, с рабочего потока.
-         */
-        fun pasteViaLongPressMenu(selfPkg: String): Boolean {
-            val service = instance ?: return false
-            return try {
-                val node = findFocusedNode(service, selfPkg, includeSelf = false) ?: return false
-                if (node.isPassword) return false
-                val rect = Rect()
-                node.getBoundsInScreen(rect)
-                if (rect.isEmpty) return false
-                val cx = rect.exactCenterX()
-                val cy = rect.exactCenterY()
-                val path = android.graphics.Path().apply { moveTo(cx, cy) }
-                val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 650)
-                val dispatched = service.dispatchGesture(
-                    android.accessibilityservice.GestureDescription.Builder()
-                        .addStroke(stroke).build(), null, null,
-                )
-                if (!dispatched) return false
-                try { Thread.sleep(700) } catch (_: InterruptedException) { return false }
-
-                // Меню всплыло: ищем кликабельный «Вставить»/«Paste» во всех окнах.
-                for (attempt in 1..3) {
-                    val windows = try { service.windows } catch (_: Throwable) { null } ?: break
-                    for (window in windows.sortedByDescending { it.isActive }) {
-                        val root = try { window.root } catch (_: Throwable) { null } ?: continue
-                        val candidates =
-                            root.findAccessibilityNodeInfosByText("Вставить") +
-                                root.findAccessibilityNodeInfosByText("Paste") +
-                                root.findAccessibilityNodeInfosByText("PASTE")
-                        for (c in candidates) {
-                            val clickable = if (c.isClickable) c else c.parent
-                            if (clickable != null) {
-                                clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                                android.util.Log.i(
-                                    "ClipCellsPaste",
-                                    "long-press menu paste: clicked ${c.text} in ${window.root?.packageName}"
-                                )
-                                return true
-                            }
-                        }
-                    }
-                    try { Thread.sleep(250) } catch (_: InterruptedException) { break }
-                }
-                false
-            } catch (_: Throwable) {
-                false
-            }
-        }
-
         private fun performPasteActionInternal(selfPkg: String, includeSelf: Boolean): Boolean {
             val service = instance ?: return false
             return try {
-                // Сфокусированный узел ЛЮБОГО типа: терминалы (Termux) и WebView
-                // не «editable», но вставку через ACTION_PASTE поддерживают —
-                // буфер к этому моменту уже записан панелью.
-                val node = findFocusedNode(service, selfPkg, includeSelf)
-                    ?: findEditableNode(service, selfPkg, includeSelf)
-                    ?: return false
+                val node = findEditableNode(service, selfPkg, includeSelf) ?: return false
                 if (node.isPassword) return false
                 node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
                 node.performAction(AccessibilityNodeInfo.ACTION_PASTE)

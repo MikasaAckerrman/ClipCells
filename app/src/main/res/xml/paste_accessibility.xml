@@ -4,7 +4,6 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
-    android:canPerformGestures="true"
     android:description="@string/paste_a11y_description"
     android:label="@string/paste_a11y_label"
     android:notificationTimeout="100" />
