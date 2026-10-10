@@ -191,7 +191,7 @@ internal fun CellEditorDialog(
                 source?.cell?.id,
                 nameTrim.ifEmpty { "Ячейка" },
                 texts,
-                source?.cell?.colorArgb ?: 0xFF8AB4F8.toInt(),
+                source?.cell?.colorArgb ?: 0xFF8AB4F8,
                 source?.cell?.icon,
                 null,
             )
