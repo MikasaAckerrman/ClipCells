@@ -195,6 +195,28 @@ object PasteFab {
                                 Toast.LENGTH_SHORT
                             ).show()
                         }
+                        is PasteResult.NotEditable -> {
+                            // Терминал/WebView: буфер + ACTION_PASTE (пилюля в
+                            // фокусе — запись легальна) — Termux и браузеры.
+                            Thread {
+                                try {
+                                    (context.getSystemService(android.content.ClipboardManager::class.java))
+                                        ?.setPrimaryClip(
+                                            android.content.ClipData.newPlainText("ClipCells", text)
+                                        )
+                                } catch (_: Exception) {
+                                }
+                                val pasted = PasteAccessibilityService.performPasteAction(selfPkg)
+                                main.post {
+                                    if (pasted) hide()
+                                    else Toast.makeText(
+                                        context,
+                                        "Поле не поддерживает вставку (${result.nodeClass})",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }.start()
+                        }
                     }
                 }
             }.start()
