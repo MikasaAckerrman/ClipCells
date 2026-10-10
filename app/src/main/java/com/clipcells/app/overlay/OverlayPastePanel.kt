@@ -649,6 +649,11 @@ object OverlayPastePanel {
                 }
                 val pasted = PasteAccessibilityService.performPasteAction(app.packageName)
                 android.util.Log.i(TAG, "paste [$what] clipboard-fallback -> $pasted")
+                // Третий эшелон (Termux): терминал не понимает ACTION_PASTE —
+                // синтезируем долгое нажатие и кликаем «Вставить» в его меню.
+                val viaMenu = if (!pasted) {
+                    PasteAccessibilityService.pasteViaLongPressMenu(app.packageName)
+                } else false
                 root.post {
                     try {
                         root.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
@@ -661,7 +666,7 @@ object OverlayPastePanel {
                     } catch (_: Exception) {
                     }
                     pasting = false
-                    if (pasted) {
+                    if (pasted || viaMenu) {
                         hide(animate = true, delayMs = 120)
                     }
                     // Молчаливый отказ: терминал не поддержал ACTION_PASTE —

@@ -280,6 +280,62 @@ class PasteAccessibilityService : AccessibilityService() {
         fun performPasteActionForTest(selfPkg: String): Boolean =
             performPasteActionInternal(selfPkg, includeSelf = true)
 
+        /**
+         * ТРЕТИЙ ЭШЕЛОН — Termux и любые View без ACTION_PASTE: сервис
+         * СИНТЕЗИРУЕТ долгое нажатие в центр сфокусированного узла
+         * (dispatchGesture — официальное API a11y-сервисов) → в выпавшем меню
+         * (контекстное меню Termux / тулбар выделения Android) находит пункт
+         * «Вставить» и кликает его — терминал читает буфер СВОИМ механизмом.
+         * Звать ПОСЛЕ записи буфера, с рабочего потока.
+         */
+        fun pasteViaLongPressMenu(selfPkg: String): Boolean {
+            val service = instance ?: return false
+            return try {
+                val node = findFocusedNode(service, selfPkg, includeSelf = false) ?: return false
+                if (node.isPassword) return false
+                val rect = Rect()
+                node.getBoundsInScreen(rect)
+                if (rect.isEmpty) return false
+                val cx = rect.exactCenterX()
+                val cy = rect.exactCenterY()
+                val path = android.graphics.Path().apply { moveTo(cx, cy) }
+                val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 650)
+                val dispatched = service.dispatchGesture(
+                    android.accessibilityservice.GestureDescription.Builder()
+                        .addStroke(stroke).build(), null, null,
+                )
+                if (!dispatched) return false
+                try { Thread.sleep(700) } catch (_: InterruptedException) { return false }
+
+                // Меню всплыло: ищем кликабельный «Вставить»/«Paste» во всех окнах.
+                for (attempt in 1..3) {
+                    val windows = try { service.windows } catch (_: Throwable) { null } ?: break
+                    for (window in windows.sortedByDescending { it.isActive }) {
+                        val root = try { window.root } catch (_: Throwable) { null } ?: continue
+                        val candidates =
+                            root.findAccessibilityNodeInfosByText("Вставить") +
+                                root.findAccessibilityNodeInfosByText("Paste") +
+                                root.findAccessibilityNodeInfosByText("PASTE")
+                        for (c in candidates) {
+                            val clickable = if (c.isClickable) c else c.parent
+                            if (clickable != null) {
+                                clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                                android.util.Log.i(
+                                    "ClipCellsPaste",
+                                    "long-press menu paste: clicked ${c.text} in ${window.root?.packageName}"
+                                )
+                                return true
+                            }
+                        }
+                    }
+                    try { Thread.sleep(250) } catch (_: InterruptedException) { break }
+                }
+                false
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
         private fun performPasteActionInternal(selfPkg: String, includeSelf: Boolean): Boolean {
             val service = instance ?: return false
             return try {
