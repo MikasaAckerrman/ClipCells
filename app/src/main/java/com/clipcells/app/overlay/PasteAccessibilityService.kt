@@ -281,6 +281,48 @@ class PasteAccessibilityService : AccessibilityService() {
             performPasteActionInternal(selfPkg, includeSelf = true)
 
         /**
+         * Termux-канал (анализ исходников termux-app): вставка в терминал
+         * возможна ТОЛЬКО через Ctrl+V (клавиши — извне не отправить), среднюю
+         * кнопку мыши или ТЕКСТОВЫЙ ТУЛБАР (настоящий EditText
+         * terminal_toolbar_text_input: EditorAction -> session.write).
+         * Пишем текст туда SET_TEXT'ом и фокусируем: клавиатура открывается,
+         * текст уже в поле — юзеру остаётся Enter (или мы диспатчим тап).
+         * Возвращает true, если текст положен в поле тулбара.
+         */
+        fun pasteIntoTermuxToolbar(selfPkg: String, text: String): Boolean {
+            val service = instance ?: return false
+            return try {
+                val windows = service.windows
+                for (window in windows.sortedByDescending { it.isActive }) {
+                    val root = try { window.root } catch (_: Throwable) { null } ?: continue
+                    if (root.packageName == selfPkg) continue
+                    val input = root.findAccessibilityNodeInfosByViewId(
+                        "com.termux:id/terminal_toolbar_text_input"
+                    ).firstOrNull() ?: continue
+                    if (!input.isVisibleToUser) continue
+                    val args = Bundle()
+                    args.putCharSequence(
+                        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text
+                    )
+                    val ok = try {
+                        input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                    } catch (_: Throwable) { false }
+                    if (ok) {
+                        try { input.performAction(AccessibilityNodeInfo.ACTION_FOCUS) } catch (_: Throwable) {}
+                        android.util.Log.i(
+                            "ClipCellsPaste",
+                            "termux toolbar: text set (${text.length} chars), focused"
+                        )
+                        return true
+                    }
+                }
+                false
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
+        /**
          * ТРЕТИЙ ЭШЕЛОН — Termux и любые View без ACTION_PASTE: сервис
          * СИНТЕЗИРУЕТ долгое нажатие в центр сфокусированного узла
          * (dispatchGesture — официальное API a11y-сервисов) → в выпавшем меню

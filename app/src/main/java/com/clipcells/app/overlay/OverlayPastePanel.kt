@@ -609,8 +609,16 @@ object OverlayPastePanel {
                         hide(animate = true, delayMs = 120)
                     }
                 } else if (result is PasteResult.NotEditable || result is PasteResult.Rejected) {
+                    // Termux-спецканал: текстовый тулбар терминала (EditText).
+                    val termux = PasteAccessibilityService.pasteIntoTermuxToolbar(app.packageName, text)
                     Handler(Looper.getMainLooper()).post {
-                        pasteViaClipboard(text, what)
+                        if (termux) {
+                            pasting = false
+                            feedback("Текст в поле Termux — нажмите Enter", OK_GREEN)
+                            hide(animate = true, delayMs = 300)
+                        } else {
+                            pasteViaClipboard(text, what)
+                        }
                     }
                 } else {
                     Handler(Looper.getMainLooper()).post { pasting = false }
