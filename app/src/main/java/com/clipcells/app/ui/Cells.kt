@@ -163,7 +163,7 @@ internal fun CellCard(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "${cell.messages.size} сообщ.",
+                    "×${cell.messages.size}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

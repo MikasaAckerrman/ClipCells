@@ -309,7 +309,11 @@ internal fun CellEditorDialog(
                                     .pointerInput(item.id) {
                                         detectDragGestures(
                                             onDragStart = {
-                                                draggedIndex.intValue = index
+                                                // Индекс решается ПО id в момент
+                                                // старта: замыкание могло устареть
+                                                // после предыдущей перестановки.
+                                                draggedIndex.intValue =
+                                                    messages.indexOfFirst { it.id == item.id }
                                                 dragAccum.floatValue = 0f
                                             },
                                             onDrag = { _, dragAmount ->
@@ -343,7 +347,14 @@ internal fun CellEditorDialog(
                             )
                             MonoField(
                                 value = item.text,
-                                onValueChange = { if (editing) messages[index] = item.copy(text = it) },
+                                onValueChange = { text ->
+                                    if (editing) {
+                                        // Пишем ТОЧНО в свою строку (по id):
+                                        // захваченный index мог устареть.
+                                        val i = messages.indexOfFirst { it.id == item.id }
+                                        if (i >= 0) messages[i] = item.copy(text = text)
+                                    }
+                                },
                                 caption = null,
                                 modifier = Modifier.weight(1f),
                                 fieldHeight = 88.dp,
