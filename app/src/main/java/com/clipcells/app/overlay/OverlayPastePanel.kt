@@ -614,7 +614,9 @@ object OverlayPastePanel {
                     Handler(Looper.getMainLooper()).post {
                         if (termux) {
                             pasting = false
-                            feedback("Текст в поле Termux — нажмите Enter", OK_GREEN)
+                            android.widget.Toast.makeText(
+                                app, "Текст в поле Termux — нажмите Enter", android.widget.Toast.LENGTH_SHORT
+                            ).show()
                             hide(animate = true, delayMs = 300)
                         } else {
                             pasteViaClipboard(text, what)
