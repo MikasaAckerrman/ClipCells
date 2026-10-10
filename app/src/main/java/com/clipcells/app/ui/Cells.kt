@@ -79,7 +79,8 @@ internal fun CellCard(
     val press = remember(cell.cell.id) { Animatable(0f) }
     val haptic = LocalHapticFeedback.current
     val gestureScope = rememberCoroutineScope()
-    val shape = RoundedCornerShape(percent = 32)
+    // Новый шейп: современная плитка 20dp (было 32% — «приевшаяся» форма).
+    val shape = RoundedCornerShape(20.dp)
     val borderBrush = MaterialTheme.colorScheme.onBackground
     val accent = MaterialTheme.colorScheme.primary
     val gesture = Modifier.pointerInput(cell.cell.id, mode) {

@@ -1,6 +1,7 @@
 package com.clipcells.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -17,10 +18,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,21 +27,18 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,14 +63,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import com.clipcells.app.data.CellDraft
 import com.clipcells.app.data.CellWithMessages
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.Collections
 
@@ -86,9 +84,30 @@ internal fun copiedText(n: Int): String = when {
 
 private data class MessageDraft(val id: Long, val text: String)
 
+/** Пороги отклика для 3-секундного удержания «Удалить» (рост вибрации). */
+private const val DELETE_HOLD_MS = 3_000L
+
+/**
+ * Редактор ячейки v0.23 (ТЗ пользователя):
+ *
+ *  - Сообщения ПОНАЧАЛУ только читаются: тап по тексту ничего не меняет;
+ *    карандаш справа включает правку (курсор+клавиатура), галочка завершает.
+ *  - Крестика удаления сообщения НЕТ: пустая ячейка (всё стёрто) удаляется
+ *    сама при сохранении.
+ *  - Удаление ячейки — жест: 3 секунды удержания заголовка с прогрессом
+ *    и нарастающей вибрацией → подтверждение «Удалить».
+ *  - Подписей «Сообщение N» нет — только приглушённый номер строки.
+ *  - Перестановка — только за ручку (не конфликтует с тапом по тексту).
+ *  - «Сохранить» — справа ВВЕРХУ (доступно при открытой клавиатуре).
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, onSave: (CellDraft) -> Unit) {
+internal fun CellEditorDialog(
+    source: CellWithMessages?,
+    onDismiss: () -> Unit,
+    onSave: (CellDraft) -> Unit,
+    onDelete: () -> Unit,
+) {
     val initialName = remember(source?.cell?.id) { source?.cell?.name.orEmpty().trim() }
     val initialMessages = remember(source?.cell?.id) { source?.orderedMessages?.map { it.text } ?: listOf("") }
 
@@ -102,10 +121,11 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
             )
         }
     }
+    /** id сообщений, находящихся в режиме правки (карандаш активен). */
+    val editingIds = remember(source?.cell?.id) { mutableStateListOf<Long>() }
     var discardConfirm by remember { mutableStateOf(false) }
+    var deleteConfirm by remember { mutableStateOf(false) }
     var lastAddedId by remember { mutableLongStateOf(Long.MIN_VALUE) }
-    var lastDeletedMessage by remember { mutableStateOf<Pair<Int, MessageDraft>?>(null) }
-    val editorSnackbar = remember { SnackbarHostState() }
 
     val dirty = name != initialName || messages.map { it.text.trim() } != initialMessages
     fun requestClose() = if (dirty) { discardConfirm = true } else onDismiss()
@@ -113,12 +133,70 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
     BackHandler { requestClose() }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    val haptic = LocalHapticFeedback.current
 
     // drag-reorder state
     val draggedIndex = remember { mutableIntStateOf(-1) }
     val dragAccum = remember { mutableFloatStateOf(0f) }
-    val stridePx = with(LocalDensity.current) { 57.dp.toPx() }
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val stridePx = with(LocalDensity.current) { 96.dp.toPx() }
+
+    // 3-секундное удержание заголовка -> «Удалить»
+    val holdProgress = remember { mutableFloatStateOf(0f) }
+    val holdJobActive = remember { mutableStateOf(false) }
+
+    fun startDeleteHold() {
+        if (source == null || holdJobActive.value) return
+        holdJobActive.value = true
+        holdProgress.floatValue = 0f
+        scope.launch {
+            val start = System.currentTimeMillis()
+            var lastTick = 0L
+            while (isActive && holdJobActive.value) {
+                val elapsed = System.currentTimeMillis() - start
+                holdProgress.floatValue = (elapsed.toFloat() / DELETE_HOLD_MS).coerceIn(0f, 1f)
+                // Нарастающий отклик: 0.5с лёгкий, 1.5с средний, 3с тяжёлый.
+                when {
+                    elapsed >= DELETE_HOLD_MS -> {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        holdJobActive.value = false
+                        deleteConfirm = true
+                        holdProgress.floatValue = 0f
+                        return@launch
+                    }
+                    elapsed - lastTick >= 500L && elapsed >= 500L -> {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        lastTick = elapsed
+                    }
+                }
+                delay(50)
+            }
+        }
+    }
+
+    fun stopDeleteHold() {
+        holdJobActive.value = false
+        holdProgress.floatValue = 0f
+    }
+
+    fun performSave() {
+        val nameTrim = name.trim()
+        val texts = messages.map { it.text.trim() }.filter { it.isNotEmpty() }
+        if (texts.isEmpty()) {
+            // Всё содержимое стёрто — ячейка удаляется сама (ТЗ: 0 символов).
+            if (source != null) onDelete() else onDismiss()
+            return
+        }
+        onSave(
+            CellDraft(
+                source?.cell?.id,
+                nameTrim.ifEmpty { "Ячейка" },
+                texts,
+                source?.cell?.colorArgb ?: 0xFF8AB4F8.toInt(),
+                source?.cell?.icon,
+                null,
+            )
+        )
+    }
 
     Box(
         Modifier
@@ -136,12 +214,53 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
             color = MaterialTheme.colorScheme.surface,
         ) {
             Column(Modifier.navigationBarsPadding().padding(20.dp)) {
-                Text(
-                    if (source == null) "Новая ячейка" else "Редактирование",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                // --- Шапка: ✕ | заголовок (3с = удалить) | Сохранить ---
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { requestClose() }) {
+                        Icon(Icons.Default.Close, "Закрыть", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .pointerInput(source?.cell?.id) {
+                                detectTapGestures(
+                                    onPress = {
+                                        try { awaitRelease() } catch (_: Exception) {}
+                                        stopDeleteHold()
+                                    },
+                                    onLongPress = {
+                                        // Долгий тап включает 3-секундный отсчёт.
+                                        startDeleteHold()
+                                    },
+                                )
+                            },
+                    ) {
+                        Text(
+                            if (source == null) "Новая ячейка" else "Редактирование",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (holdProgress.floatValue > 0f) {
+                            // Индикатор «до удаления»: тонкая линия под заголовком.
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(3.dp)
+                                    .align(Alignment.BottomCenter)
+                                    .background(MaterialTheme.colorScheme.primary)
+                                    .graphicsLayer { scaleX = holdProgress.floatValue.coerceIn(0.02f, 1f) },
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = { performSave() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                    ) { Text("Сохранить") }
+                }
                 Spacer(Modifier.height(12.dp))
                 MonoField(
                     value = name,
@@ -151,10 +270,15 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth().height(0.5.dp).background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(0.5.dp)
+                        .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Тяните строку для перестановки",
+                    "Ручка слева — перестановка · карандаш — правка",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 )
@@ -164,77 +288,86 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     itemsIndexed(messages, key = { _, item -> item.id }) { index, item ->
+                        val editing = item.id in editingIds
                         Row(
-                            verticalAlignment = Alignment.Bottom,
+                            verticalAlignment = Alignment.Top,
                             modifier = Modifier
                                 .animateItemPlacement()
                                 .graphicsLayer {
                                     alpha = if (draggedIndex.intValue == index) 0.85f else 1f
                                     shadowElevation = if (draggedIndex.intValue == index) 12f else 0f
-                                }
-                                .pointerInput(item.id) {
-                                    detectDragGestures(
-                                        onDragStart = {
-                                            draggedIndex.intValue = index
-                                            dragAccum.floatValue = 0f
-                                        },
-                                        onDrag = { _, dragAmount ->
-                                            val current = draggedIndex.intValue
-                                            if (current < 0) return@detectDragGestures
-                                            dragAccum.floatValue += dragAmount.y
-                                            if (dragAccum.floatValue > stridePx && current < messages.lastIndex) {
-                                                Collections.swap(messages, current, current + 1)
-                                                draggedIndex.intValue = current + 1
-                                                dragAccum.floatValue -= stridePx
-                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                            } else if (dragAccum.floatValue < -stridePx && current > 0) {
-                                                Collections.swap(messages, current, current - 1)
-                                                draggedIndex.intValue = current - 1
-                                                dragAccum.floatValue += stridePx
-                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                            }
-                                        },
-                                        onDragEnd = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
-                                        onDragCancel = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
-                                    )
                                 },
                         ) {
+                            // Ручка перестановки: драг ТОЛЬКО отсюда — не
+                            // конфликтует с тапом по тексту и карандашом.
                             Icon(
                                 Icons.Default.Menu,
-                                "Перетащить",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(32.dp),
+                                "Переставить",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (editing) 0.25f else 0.8f),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .pointerInput(item.id) {
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                draggedIndex.intValue = index
+                                                dragAccum.floatValue = 0f
+                                            },
+                                            onDrag = { _, dragAmount ->
+                                                val current = draggedIndex.intValue
+                                                if (current < 0) return@detectDragGestures
+                                                dragAccum.floatValue += dragAmount.y
+                                                if (dragAccum.floatValue > stridePx && current < messages.lastIndex) {
+                                                    Collections.swap(messages, current, current + 1)
+                                                    draggedIndex.intValue = current + 1
+                                                    dragAccum.floatValue -= stridePx
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                } else if (dragAccum.floatValue < -stridePx && current > 0) {
+                                                    Collections.swap(messages, current, current - 1)
+                                                    draggedIndex.intValue = current - 1
+                                                    dragAccum.floatValue += stridePx
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                }
+                                            },
+                                            onDragEnd = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
+                                            onDragCancel = { draggedIndex.intValue = -1; dragAccum.floatValue = 0f },
+                                        )
+                                    },
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            // Номер строки: только цифра, приглушённая.
+                            Text(
+                                "${index + 1}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.width(24.dp).padding(top = 14.dp),
                             )
                             MonoField(
                                 value = item.text,
-                                onValueChange = { messages[index] = item.copy(text = it) },
-                                caption = "Сообщение ${index + 1}",
+                                onValueChange = { if (editing) messages[index] = item.copy(text = it) },
+                                caption = null,
                                 modifier = Modifier.weight(1f),
                                 fieldHeight = 88.dp,
                                 autoFocus = item.id == lastAddedId,
+                                readOnly = !editing,
                             )
+                            // Карандаш/галочка: включение и завершение правки.
                             IconButton(
                                 onClick = {
-                                    if (messages.size > 1) {
-                                        val deleted = messages.removeAt(index)
-                                        lastDeletedMessage = index to deleted
-                                        scope.launch {
-                                            val action = editorSnackbar.showSnackbar(
-                                                "Сообщение удалено",
-                                                "Отменить",
-                                                duration = SnackbarDuration.Short,
-                                            )
-                                            if (action == SnackbarResult.ActionPerformed) {
-                                                lastDeletedMessage?.let { (pos, msg) ->
-                                                    messages.add(pos.coerceAtMost(messages.size), msg)
-                                                    lastDeletedMessage = null
-                                                }
-                                            }
-                                        }
+                                    if (item.id in editingIds) editingIds.remove(item.id)
+                                    else {
+                                        editingIds.add(item.id)
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     }
                                 },
-                                enabled = messages.size > 1,
-                            ) { Icon(Icons.Default.Close, "Удалить сообщение") }
+                                modifier = Modifier.size(44.dp),
+                            ) {
+                                Icon(
+                                    if (editing) Icons.Default.Check else Icons.Default.Edit,
+                                    if (editing) "Завершить правку" else "Редактировать",
+                                    tint = if (editing) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
@@ -242,60 +375,85 @@ internal fun CellEditorDialog(source: CellWithMessages?, onDismiss: () -> Unit, 
                     onClick = {
                         val newId = nextId--
                         messages.add(MessageDraft(newId, ""))
+                        editingIds.add(newId)
                         lastAddedId = newId
                         scope.launch { listState.animateScrollToItem(messages.lastIndex) }
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Icon(Icons.Default.Add, null); Text(" Добавить сообщение") }
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { requestClose() }) { Text("Отмена") }
-                    Button(onClick = {
-                        onSave(CellDraft(source?.cell?.id, name, messages.map { it.text }, source?.cell?.colorArgb ?: 0xFF6750A4, source?.cell?.icon, null))
-                    }) { Text("Сохранить") }
-                }
-                SnackbarHost(editorSnackbar)
             }
         }
     }
+
     if (discardConfirm) {
         AlertDialog(
             onDismissRequest = { discardConfirm = false },
-            title = { Text("Закрыть редактор?") },
-            text = { Text("Несохранённые изменения будут потеряны.") },
-            confirmButton = { TextButton(onClick = onDismiss) { Text("Выйти") } },
+            title = { Text("Отменить изменения?") },
+            text = { Text("Правки не сохранятся") },
+            confirmButton = { Button(onClick = onDismiss) { Text("Отменить правки") } },
             dismissButton = { TextButton(onClick = { discardConfirm = false }) { Text("Продолжить") } },
+        )
+    }
+    if (deleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { deleteConfirm = false },
+            title = { Text("Удалить ячейку?") },
+            text = { Text("«${source?.cell?.name ?: ""}» и все её сообщения") },
+            confirmButton = {
+                Button(
+                    onClick = { deleteConfirm = false; onDelete() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("Удалить") }
+            },
+            dismissButton = { TextButton(onClick = { deleteConfirm = false }) { Text("Отмена") } },
         )
     }
 }
 
+/**
+ * Поле ввода «стекла». readOnly: текст читается (рамки почти нет, курсора
+ * нет, клавиатура не вызывается) — редактирование только после карандаша.
+ */
 @Composable
-private fun MonoField(
+internal fun MonoField(
     value: String,
     onValueChange: (String) -> Unit,
-    caption: String,
-    modifier: Modifier = Modifier,
+    caption: String?,
     singleLine: Boolean = false,
-    fieldHeight: androidx.compose.ui.unit.Dp = 44.dp,
+    modifier: Modifier = Modifier,
+    fieldHeight: androidx.compose.ui.unit.Dp = 56.dp,
     autoFocus: Boolean = false,
+    readOnly: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(autoFocus) { if (autoFocus) focusRequester.requestFocus() }
-    val border = if (focused) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
-    val captionColor = if (focused) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    val active = focused && !readOnly
+    val border by animateColorAsState(
+        if (active) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.outline.copy(alpha = if (readOnly) 0.25f else 1f),
+        label = "border",
+    )
     Column(modifier) {
-        Text(caption, style = MaterialTheme.typography.labelMedium, color = captionColor)
-        Spacer(Modifier.height(2.dp))
+        if (caption != null) {
+            Text(caption, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(2.dp))
+        }
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
+            readOnly = readOnly,
             singleLine = singleLine,
             minLines = if (singleLine) 1 else 3,
             maxLines = if (singleLine) 1 else 4,
             keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                color = if (readOnly) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
+                else MaterialTheme.colorScheme.onSurface,
+            ),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(fieldHeight)
@@ -320,61 +478,6 @@ private fun MonoField(
                 }
             },
         )
-    }
-}
-
-@Composable
-internal fun MessageSelectorDialog(cell: CellWithMessages, onDismiss: () -> Unit, onCopy: (List<Long>) -> Unit) {
-    var selected by remember(cell.cell.id) { mutableStateOf(listOf<Long>()) }
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) {
-            Column(Modifier.padding(18.dp)) {
-                Text(cell.cell.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                Text("Выберите сообщения в нужном порядке", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(12.dp))
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier.fillMaxWidth().height(300.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(cell.orderedMessages, key = { it.id }, contentType = { "message" }) { message ->
-                        val order = selected.indexOf(message.id)
-                        Card(
-                            onClick = { selected = if (order >= 0) selected - message.id else selected + message.id },
-                            modifier = Modifier.height(92.dp),
-                            shape = RoundedCornerShape(percent = 32),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (order >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                            ),
-                        ) {
-                            Box(Modifier.fillMaxSize().padding(8.dp)) {
-                                Text(
-                                    message.text,
-                                    maxLines = 4,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (order >= 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                if (order >= 0) {
-                                    Text(
-                                        "${order + 1}",
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.align(Alignment.BottomEnd),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(14.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Закрыть") }
-                    Button(onClick = { onCopy(selected) }) { Text("Копировать") }
-                }
-            }
-        }
     }
 }
 

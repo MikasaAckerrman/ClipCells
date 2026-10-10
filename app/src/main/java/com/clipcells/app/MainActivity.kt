@@ -80,7 +80,6 @@ import com.clipcells.app.ui.ClipCellsTheme
 import com.clipcells.app.ui.DisplaySettingsDialog
 import com.clipcells.app.ui.EmptyState
 import com.clipcells.app.ui.HomeMode
-import com.clipcells.app.ui.MessageSelectorDialog
 import com.clipcells.app.ui.copiedText
 import kotlinx.coroutines.launch
 
@@ -121,7 +120,6 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
     var mode by remember { mutableStateOf(HomeMode.NORMAL) }
     var editorCell by remember { mutableStateOf<CellWithMessages?>(null) }
     var showEditor by remember { mutableStateOf(false) }
-    var selectorCell by remember { mutableStateOf<CellWithMessages?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var deleteConfirm by remember { mutableStateOf(false) }
     var selectedCells by remember { mutableStateOf(setOf<Long>()) }
@@ -272,19 +270,23 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                             selected = cell.cell.id in selectedCells,
                             onTap = {
                                 when (mode) {
-                                    HomeMode.NORMAL -> vm.copyWhole(
-                                        cell.cell.id,
-                                        onCopied = { count, text ->
-                                            PasteFab.show(context, cell.cell.name, text)
-                                            scope.launch { snackbar.showSnackbar(copiedText(count) + " · кнопка «Вставить» ставит текст прямо в поле") }
-                                        },
-                                        onError = { onCopyError(it) },
-                                    )
+                                    // Тап — РЕДАКТОР (копирование больше не приоритет).
+                                    HomeMode.NORMAL -> { editorCell = cell; showEditor = true }
                                     HomeMode.EDIT -> { editorCell = cell; showEditor = true }
                                     HomeMode.DELETE -> selectedCells = if (cell.cell.id in selectedCells) selectedCells - cell.cell.id else selectedCells + cell.cell.id
                                 }
                             },
-                            onHold = { if (mode == HomeMode.NORMAL) selectorCell = cell },
+                            // Удержание — копирование всей ячейки (проверка записи).
+                            onHold = {
+                                if (mode == HomeMode.NORMAL) vm.copyWhole(
+                                    cell.cell.id,
+                                    onCopied = { count, text ->
+                                        PasteFab.show(context, cell.cell.name, text)
+                                        scope.launch { snackbar.showSnackbar(copiedText(count) + " · кнопка «Вставить» ставит текст прямо в поле") }
+                                    },
+                                    onError = { onCopyError(it) },
+                                )
+                            },
                         )
                     }
                 }
@@ -307,22 +309,18 @@ private fun ClipCellsApp(vm: MainViewModel = viewModel()) {
                     result.onSuccess { showEditor = false; mode = HomeMode.NORMAL }.onFailure { error = it.message }
                 }
             },
-        )
-    }
-    selectorCell?.let { cell ->
-        MessageSelectorDialog(
-            cell = cell,
-            onDismiss = { selectorCell = null },
-            onCopy = { ids ->
-                selectorCell = null
-                if (ids.isNotEmpty()) vm.copySelected(
-                            cell.cell.id, ids,
-                            onCopied = { count, text ->
-                                PasteFab.show(context, "выбранное", text)
-                                scope.launch { snackbar.showSnackbar(copiedText(count) + " · кнопка «Вставить» ставит текст прямо в поле") }
-                            },
-                            onError = { onCopyError(it) },
-                        )
+            onDelete = {
+                val id = editorCell?.cell?.id
+                showEditor = false
+                mode = HomeMode.NORMAL
+                if (id != null) {
+                    vm.delete(setOf(id), onDone = {
+                        scope.launch {
+                            val r = snackbar.showSnackbar("Ячейка удалена", "Отменить", duration = androidx.compose.material3.SnackbarDuration.Long)
+                            if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) vm.undoDelete { }
+                        }
+                    }, onError = { error = it.message })
+                }
             },
         )
     }
