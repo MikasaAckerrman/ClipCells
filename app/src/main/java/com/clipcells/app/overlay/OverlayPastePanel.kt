@@ -600,9 +600,72 @@ object OverlayPastePanel {
                     }
                     return@Thread
                 }
-                Handler(Looper.getMainLooper()).post {
+                // Не-редактируемое поле (терминал/WebView) или отказ SET_TEXT —
+                // УНИВЕРСАЛЬНЫЙ путь: буфер + ACTION_PASTE. Работает в Termux
+                // и любых View, поддерживающих paste.
+                if (result == PasteResult.Pasted) {
+                    Handler(Looper.getMainLooper()).post {
+                        pasting = false
+                        hide(animate = true, delayMs = 120)
+                    }
+                } else if (result is PasteResult.NotEditable || result is PasteResult.Rejected) {
+                    Handler(Looper.getMainLooper()).post {
+                        pasteViaClipboard(text, what)
+                    }
+                } else {
+                    Handler(Looper.getMainLooper()).post { pasting = false }
+                }
+            }.start()
+        }
+
+        /**
+         * Буферная вставка для «не полей» (терминалы, WebView): панель на МИГ
+         * делается фокусируемой (легальная запись буфера Android 10+), затем
+         * a11y шлёт ACTION_PASTE сфокусированному узлу — текст читает само
+         * целевое приложение. Окно возвращается в НЕфокусируемое состояние.
+         */
+        private fun pasteViaClipboard(text: String, what: String) {
+            val lp = root.layoutParams as? WindowManager.LayoutParams
+            if (lp == null) { pasting = false; return }
+            val latch = java.util.concurrent.CountDownLatch(1)
+            // Слушатель ставим ДО переключения флагов — иначе событие теряем.
+            val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+                if (hasFocus) latch.countDown()
+            }
+            root.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+            if (root.hasWindowFocus()) latch.countDown()
+            lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            try {
+                wm.updateViewLayout(root, lp)
+            } catch (_: Exception) {
+                latch.countDown()
+            }
+            Thread {
+                try { latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: InterruptedException) {}
+                try {
+                    (app.getSystemService(android.content.ClipboardManager::class.java))
+                        ?.setPrimaryClip(android.content.ClipData.newPlainText("ClipCells", text))
+                } catch (_: Exception) {
+                }
+                val pasted = PasteAccessibilityService.performPasteAction(app.packageName)
+                android.util.Log.i(TAG, "paste [$what] clipboard-fallback -> $pasted")
+                root.post {
+                    try {
+                        root.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+                    } catch (_: Exception) {
+                    }
+                    // Окно снова НЕфокусируемое: фокус — приложению под панелью.
+                    lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                    try {
+                        wm.updateViewLayout(root, lp)
+                    } catch (_: Exception) {
+                    }
                     pasting = false
-                    if (result == PasteResult.Pasted) hide(animate = true, delayMs = 120)
+                    if (pasted) {
+                        hide(animate = true, delayMs = 120)
+                    }
+                    // Молчаливый отказ: терминал не поддержал ACTION_PASTE —
+                    // текст УЖЕ в буфере, приложение вставит своим механизмом.
                 }
             }.start()
         }

@@ -15,6 +15,9 @@ sealed interface PasteResult {
     object NoService : PasteResult
     object NoField : PasteResult
     data class Rejected(val nodeClass: String) : PasteResult
+    /** Поле есть и сфокусировано, но НЕ редактируемое (терминалы, WebView):
+     *  прямой записи нет — панель обязана пройти буферным путём ACTION_PASTE. */
+    data class NotEditable(val nodeClass: String) : PasteResult
 }
 
 /**
@@ -180,6 +183,17 @@ class PasteAccessibilityService : AccessibilityService() {
         ): PasteResult {
             val service = instance ?: return PasteResult.NoService
             return try {
+                // 1) Сфокусированный узел ЛЮБОГО типа (терминал не editable!):
+                //    не редактируемый — буферный путь (ACTION_PASTE).
+                findFocusedNode(service, selfPkg, includeSelf)?.let { focused ->
+                    if (!focused.isEditable) {
+                        return if (focused.isPassword) {
+                            PasteResult.Rejected("парольное поле")
+                        } else {
+                            PasteResult.NotEditable(focused.className?.toString() ?: "?")
+                        }
+                    }
+                }
                 val node = findEditableNode(service, selfPkg, includeSelf) ?: return PasteResult.NoField
                 // Парольные поля не трогаем — политика и безопасность.
                 if (node.isPassword) return PasteResult.Rejected("парольное поле")
@@ -195,6 +209,27 @@ class PasteAccessibilityService : AccessibilityService() {
             } catch (_: Throwable) {
                 PasteResult.NoField
             }
+        }
+
+        /** Сфокусированный узел ЛЮБОГО типа в чужом окне (терминал, WebView). */
+        private fun findFocusedNode(
+            service: PasteAccessibilityService,
+            selfPkg: String,
+            includeSelf: Boolean,
+        ): AccessibilityNodeInfo? {
+            try {
+                val windowList = service.windows
+                for (window in windowList.sortedByDescending { it.isActive }) {
+                    val root = try { window.root } catch (_: Throwable) { null } ?: continue
+                    if (!includeSelf && root.packageName == selfPkg) continue
+                    val focused = try {
+                        root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                    } catch (_: Throwable) { null }
+                    if (focused != null) return focused
+                }
+            } catch (_: Throwable) {
+            }
+            return null
         }
 
         /**
@@ -248,7 +283,12 @@ class PasteAccessibilityService : AccessibilityService() {
         private fun performPasteActionInternal(selfPkg: String, includeSelf: Boolean): Boolean {
             val service = instance ?: return false
             return try {
-                val node = findEditableNode(service, selfPkg, includeSelf) ?: return false
+                // Сфокусированный узел ЛЮБОГО типа: терминалы (Termux) и WebView
+                // не «editable», но вставку через ACTION_PASTE поддерживают —
+                // буфер к этому моменту уже записан панелью.
+                val node = findFocusedNode(service, selfPkg, includeSelf)
+                    ?: findEditableNode(service, selfPkg, includeSelf)
+                    ?: return false
                 if (node.isPassword) return false
                 node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
                 node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
