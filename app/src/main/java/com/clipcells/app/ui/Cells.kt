@@ -81,6 +81,7 @@ internal fun CellCard(
     val gestureScope = rememberCoroutineScope()
     val shape = RoundedCornerShape(percent = 32)
     val borderBrush = MaterialTheme.colorScheme.onBackground
+    val accent = MaterialTheme.colorScheme.primary
     val gesture = Modifier.pointerInput(cell.cell.id, mode) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
@@ -138,7 +139,7 @@ internal fun CellCard(
                     val hold = holdProgress.value
                     val width = (if (selected) 2f else 1f + hold * 3f).dp.toPx()
                     val brush = if (selected) {
-                        MaterialTheme.colorScheme.primary
+                        accent
                     } else {
                         borderBrush.copy(alpha = 0.35f + hold * 0.65f)
                     }
